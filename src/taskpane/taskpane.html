@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Procurement Workflow</title>
+    
+    <!-- Office.js library -->
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js" type="text/javascript"></script>
+    
+    <!-- MSAL.js for Microsoft Graph authentication -->
+    <script src="https://alcdn.msauth.net/browser/2.38.0/js/msal-browser.min.js" type="text/javascript"></script>
+    
+    <!-- Fluent UI for consistent Microsoft styling -->
+    <link rel="stylesheet" href="https://static2.sharepointonline.com/files/fabric/office-ui-fabric-core/11.0.0/css/fabric.min.css"/>
+    
+    <!-- Custom styles -->
+    <link rel="stylesheet" href="taskpane.css"/>
+</head>
+<body class="ms-Fabric">
+    <div id="app-container">
+        
+        <!-- Header -->
+        <header class="header">
+            <h1 class="ms-font-xl">Procurement Workflow</h1>
+            <div class="header-actions">
+                <!-- Auth Status -->
+                <div id="auth-status" class="auth-status">
+                    <button id="sign-in-btn" class="ms-Button ms-Button--primary sign-in-btn">
+                        <span class="ms-Button-label">Sign In</span>
+                    </button>
+                    <div id="user-info" class="user-info hidden">
+                        <span id="user-name" class="user-name"></span>
+                        <button id="sign-out-btn" class="ms-Button ms-Button--icon" title="Sign Out">
+                            <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--SignOut"></i></span>
+                        </button>
+                    </div>
+                </div>
+                <button id="refresh-btn" class="ms-Button ms-Button--icon" title="Refresh">
+                    <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--Refresh"></i></span>
+                </button>
+                <button id="settings-btn" class="ms-Button ms-Button--icon" title="Settings">
+                    <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--Settings"></i></span>
+                </button>
+            </div>
+        </header>
+
+        <!-- Navigation Tabs -->
+        <nav class="nav-tabs">
+            <button class="nav-tab active" data-tab="rfq-workflow">RFQ Workflow</button>
+            <button class="nav-tab" data-tab="email-processing">Email Processing</button>
+            <button class="nav-tab" data-tab="quote-comparison">Quote Comparison</button>
+        </nav>
+
+        <!-- Loading Overlay -->
+        <div id="loading-overlay" class="loading-overlay hidden">
+            <div class="spinner"></div>
+            <p id="loading-message">Loading...</p>
+        </div>
+
+        <!-- Error Banner -->
+        <div id="error-banner" class="error-banner hidden">
+            <span id="error-message"></span>
+            <button id="dismiss-error" class="ms-Button ms-Button--icon">
+                <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--Cancel"></i></span>
+            </button>
+        </div>
+
+        <!-- Success Banner -->
+        <div id="success-banner" class="success-banner hidden">
+            <span id="success-message"></span>
+            <button id="dismiss-success" class="ms-Button ms-Button--icon">
+                <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--Cancel"></i></span>
+            </button>
+        </div>
+
+        <!-- Main Content Area -->
+        <main id="main-content">
+
+            <!-- ==================== RFQ WORKFLOW TAB ==================== -->
+            <section id="rfq-workflow-tab" class="tab-content active">
+                
+                <!-- Step 1: Select PR -->
+                <div id="step-select-pr" class="workflow-step">
+                    <h2 class="ms-font-l step-header">
+                        <span class="step-number">1</span>
+                        Select Purchase Requisition
+                    </h2>
+                    <div class="step-content">
+                        <div id="pr-list-container">
+                            <div class="search-box">
+                                <input type="text" id="pr-search" placeholder="Search PRs..." class="ms-TextField-field"/>
+                            </div>
+                            <div id="pr-list" class="selectable-list">
+                                <!-- PR items will be inserted here -->
+                                <p class="placeholder-text">Click "Refresh" to load open PRs</p>
+                            </div>
+                        </div>
+                        <div id="selected-pr-info" class="selected-item-info hidden">
+                            <h3>Selected PR:</h3>
+                            <div id="pr-details"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 2: Select Suppliers -->
+                <div id="step-select-suppliers" class="workflow-step disabled">
+                    <h2 class="ms-font-l step-header">
+                        <span class="step-number">2</span>
+                        Select Suppliers
+                    </h2>
+                    <div class="step-content">
+                        <div id="supplier-list-container">
+                            <div class="list-header">
+                                <span id="supplier-count">0 suppliers found</span>
+                                <label class="select-all-label">
+                                    <input type="checkbox" id="select-all-suppliers"/>
+                                    Select All
+                                </label>
+                            </div>
+                            <div id="supplier-list" class="selectable-list checkbox-list">
+                                <!-- Supplier items will be inserted here -->
+                            </div>
+                        </div>
+                        <button id="generate-rfqs-btn" class="ms-Button ms-Button--primary" disabled>
+                            <span class="ms-Button-label">Generate RFQs</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Step 3: Review & Send RFQs -->
+                <div id="step-review-rfqs" class="workflow-step disabled">
+                    <h2 class="ms-font-l step-header">
+                        <span class="step-number">3</span>
+                        Review & Send RFQs
+                    </h2>
+                    <div class="step-content">
+                        <div id="rfq-list" class="rfq-cards-container">
+                            <!-- RFQ cards will be inserted here -->
+                        </div>
+                        <div class="action-buttons">
+                            <button id="send-all-rfqs-btn" class="ms-Button ms-Button--primary" disabled>
+                                <span class="ms-Button-label">Send All RFQs</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+            </section>
+
+            <!-- ==================== EMAIL PROCESSING TAB ==================== -->
+            <section id="email-processing-tab" class="tab-content hidden">
+                
+                <!-- Current Email Info -->
+                <div id="current-email-section" class="email-section">
+                    <h2 class="ms-font-l">Current Email</h2>
+                    <div id="current-email-info" class="email-info-card">
+                        <p class="placeholder-text">Select an email to process</p>
+                    </div>
+                </div>
+
+                <!-- Classification Section -->
+                <div id="classification-section" class="email-section">
+                    <h2 class="ms-font-l">Classification</h2>
+                    <div id="classification-result" class="classification-card hidden">
+                        <div class="classification-badge" id="classification-badge"></div>
+                        <p id="classification-confidence"></p>
+                    </div>
+                    <button id="classify-email-btn" class="ms-Button ms-Button--primary">
+                        <span class="ms-Button-label">Classify Email</span>
+                    </button>
+                </div>
+
+                <!-- Processing Actions -->
+                <div id="processing-section" class="email-section hidden">
+                    <h2 class="ms-font-l">Actions</h2>
+                    
+                    <!-- Quote Processing -->
+                    <div id="quote-processing" class="processing-card hidden">
+                        <h3>Quote Detected</h3>
+                        <p>Extract quote details from this email</p>
+                        <button id="extract-quote-btn" class="ms-Button ms-Button--primary">
+                            <span class="ms-Button-label">Extract Quote</span>
+                        </button>
+                        <div id="extracted-quote-details" class="quote-details hidden"></div>
+                    </div>
+
+                    <!-- Clarification Processing -->
+                    <div id="clarification-processing" class="processing-card hidden">
+                        <h3>Clarification Request</h3>
+                        <div id="clarification-details">
+                            <p><strong>Sub-classification:</strong> <span id="sub-classification"></span></p>
+                            <p><strong>Question:</strong></p>
+                            <div id="clarification-question" class="question-box"></div>
+                        </div>
+                        
+                        <!-- Procurement Response -->
+                        <div id="procurement-response" class="hidden">
+                            <h4>Suggested Response:</h4>
+                            <textarea id="suggested-response" class="ms-TextField-field" rows="6"></textarea>
+                            <div class="action-buttons">
+                                <button id="send-response-btn" class="ms-Button ms-Button--primary">
+                                    <span class="ms-Button-label">Create Draft Reply</span>
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <!-- Engineering Forward -->
+                        <div id="engineering-forward" class="hidden">
+                            <p class="info-text">This question requires engineering review.</p>
+                            <button id="forward-to-engineering-btn" class="ms-Button ms-Button--primary">
+                                <span class="ms-Button-label">Forward to Engineering</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Engineer Response Processing -->
+                    <div id="engineer-response-processing" class="processing-card hidden">
+                        <h3>Engineer Response Detected</h3>
+                        <p>Generate supplier response based on engineer's input</p>
+                        <button id="process-engineer-response-btn" class="ms-Button ms-Button--primary">
+                            <span class="ms-Button-label">Generate Supplier Response</span>
+                        </button>
+                        <div id="engineer-draft-response" class="hidden">
+                            <h4>Draft Response to Supplier:</h4>
+                            <textarea id="engineer-draft-body" class="ms-TextField-field" rows="6"></textarea>
+                            <button id="create-engineer-draft-btn" class="ms-Button ms-Button--primary">
+                                <span class="ms-Button-label">Create Draft Reply</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+            </section>
+
+            <!-- ==================== QUOTE COMPARISON TAB ==================== -->
+            <section id="quote-comparison-tab" class="tab-content hidden">
+                
+                <div class="quote-comparison-header">
+                    <h2 class="ms-font-l">Quote Comparison</h2>
+                    <div class="rfq-selector">
+                        <label for="rfq-select">Select RFQ:</label>
+                        <select id="rfq-select" class="ms-Dropdown-select">
+                            <option value="">-- Select an RFQ --</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div id="quotes-container" class="quotes-grid">
+                    <p class="placeholder-text">Select an RFQ to view and compare quotes</p>
+                </div>
+
+                <div id="quote-summary" class="quote-summary hidden">
+                    <h3>Summary</h3>
+                    <div id="summary-content"></div>
+                </div>
+
+            </section>
+
+        </main>
+
+        <!-- Settings Modal -->
+        <div id="settings-modal" class="modal hidden">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Settings</h2>
+                    <button id="close-settings" class="ms-Button ms-Button--icon">
+                        <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--Cancel"></i></span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="setting-group">
+                        <label for="api-url">Backend API URL:</label>
+                        <input type="text" id="api-url" class="ms-TextField-field" value="http://localhost:8000"/>
+                    </div>
+                    <div class="setting-group">
+                        <label for="engineering-email">Engineering Team Email:</label>
+                        <input type="email" id="engineering-email" class="ms-TextField-field" placeholder="engineering@company.com"/>
+                    </div>
+                    <div class="setting-group">
+                        <label>
+                            <input type="checkbox" id="auto-classify" checked/>
+                            Auto-classify incoming emails
+                        </label>
+                    </div>
+                    <div class="setting-group">
+                        <label>
+                            <input type="checkbox" id="auto-create-folders" checked/>
+                            Auto-create folder structure
+                        </label>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button id="save-settings" class="ms-Button ms-Button--primary">
+                        <span class="ms-Button-label">Save Settings</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- RFQ Preview Modal -->
+        <div id="rfq-preview-modal" class="modal hidden">
+            <div class="modal-content modal-large">
+                <div class="modal-header">
+                    <h2>RFQ Preview</h2>
+                    <button id="close-rfq-preview" class="ms-Button ms-Button--icon">
+                        <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--Cancel"></i></span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="rfq-preview-section">
+                        <label>To:</label>
+                        <input type="email" id="preview-to" class="ms-TextField-field" readonly/>
+                    </div>
+                    <div class="rfq-preview-section">
+                        <label>Subject:</label>
+                        <input type="text" id="preview-subject" class="ms-TextField-field"/>
+                    </div>
+                    <div class="rfq-preview-section">
+                        <label>Body:</label>
+                        <textarea id="preview-body" class="ms-TextField-field" rows="15"></textarea>
+                    </div>
+                    <div class="rfq-preview-section">
+                        <label>Attachments:</label>
+                        <div id="preview-attachments" class="attachments-list"></div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button id="create-draft-btn" class="ms-Button">
+                        <span class="ms-Button-label">Create Draft</span>
+                    </button>
+                    <button id="finalize-send-btn" class="ms-Button ms-Button--primary">
+                        <span class="ms-Button-label">Finalize & Send</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- JavaScript Files -->
+    <script src="../services/auth.js"></script>
+    <script src="../services/config.js"></script>
+    <script src="../services/api-client.js"></script>
+    <script src="../services/email-operations.js"></script>
+    <script src="../services/folder-management.js"></script>
+    <script src="../services/email-monitor.js"></script>
+    <script src="../utils/helpers.js"></script>
+    <script src="taskpane.js"></script>
+</body>
+</html>

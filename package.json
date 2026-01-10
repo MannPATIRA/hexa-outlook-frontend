@@ -1,0 +1,31 @@
+{
+  "name": "outlook-procurement-addin",
+  "version": "1.0.0",
+  "description": "Outlook Add-in for Procurement Workflow - RFQ Management",
+  "main": "src/taskpane/taskpane.js",
+  "scripts": {
+    "start": "office-addin-debugging start manifest.xml",
+    "start:desktop": "office-addin-debugging start manifest.xml desktop",
+    "start:web": "office-addin-debugging start manifest.xml web",
+    "stop": "office-addin-debugging stop manifest.xml",
+    "validate": "office-addin-manifest validate manifest.xml",
+    "dev-server": "npx http-server . -p 3000 --cors -c-1",
+    "sideload": "office-addin-dev-certs install && npx office-toolbox sideload -m manifest.xml -a outlook",
+    "build": "echo 'No build step required for this project'"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "office-addin-debugging": "^5.0.0",
+    "office-addin-dev-certs": "^1.11.0",
+    "office-addin-manifest": "^1.12.0",
+    "http-server": "^14.1.1"
+  },
+  "keywords": [
+    "outlook",
+    "add-in",
+    "procurement",
+    "rfq"
+  ],
+  "author": "",
+  "license": "MIT"
+}

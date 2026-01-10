@@ -1,0 +1,914 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Procurement Add-in - Test Mode</title>
+    
+    <!-- Fluent UI -->
+    <link rel="stylesheet" href="https://static2.sharepointonline.com/files/fabric/office-ui-fabric-core/11.0.0/css/fabric.min.css"/>
+    
+    <!-- Custom styles -->
+    <link rel="stylesheet" href="src/taskpane/taskpane.css"/>
+    
+    <style>
+        .test-banner {
+            background-color: #fff4ce;
+            border-left: 4px solid #ffaa44;
+            padding: 12px 16px;
+            margin: 10px;
+            font-size: 13px;
+        }
+        .test-banner strong {
+            color: #835c00;
+        }
+        .mock-controls {
+            background-color: #f0f0f0;
+            padding: 10px;
+            margin: 10px;
+            border-radius: 4px;
+        }
+        .mock-controls h3 {
+            margin-bottom: 10px;
+            font-size: 14px;
+        }
+        .mock-controls button {
+            margin-right: 8px;
+            margin-bottom: 8px;
+        }
+    </style>
+</head>
+<body class="ms-Fabric">
+    
+    <!-- Test Mode Banner -->
+    <div class="test-banner">
+        <strong>⚠️ Test Mode</strong><br>
+        Running outside of Outlook. Email operations are simulated. 
+        API calls go to the configured backend.
+    </div>
+    
+    <!-- Mock Controls for Testing -->
+    <div class="mock-controls">
+        <h3>Test Controls</h3>
+        <button onclick="loadMockPRs()" class="ms-Button ms-Button--small">
+            Load Mock PRs
+        </button>
+        <button onclick="loadMockSuppliers()" class="ms-Button ms-Button--small">
+            Load Mock Suppliers
+        </button>
+        <button onclick="simulateEmailContext()" class="ms-Button ms-Button--small">
+            Simulate Email Context
+        </button>
+        <button onclick="testBackendConnection()" class="ms-Button ms-Button--small ms-Button--primary">
+            Test Backend Connection
+        </button>
+    </div>
+    
+    <div id="app-container">
+        
+        <!-- Header -->
+        <header class="header">
+            <h1 class="ms-font-xl">Procurement Workflow</h1>
+            <div class="header-actions">
+                <button id="refresh-btn" class="ms-Button ms-Button--icon" title="Refresh">
+                    <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--Refresh"></i></span>
+                </button>
+                <button id="settings-btn" class="ms-Button ms-Button--icon" title="Settings">
+                    <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--Settings"></i></span>
+                </button>
+            </div>
+        </header>
+
+        <!-- Navigation Tabs -->
+        <nav class="nav-tabs">
+            <button class="nav-tab active" data-tab="rfq-workflow">RFQ Workflow</button>
+            <button class="nav-tab" data-tab="email-processing">Email Processing</button>
+            <button class="nav-tab" data-tab="quote-comparison">Quote Comparison</button>
+        </nav>
+
+        <!-- Loading Overlay -->
+        <div id="loading-overlay" class="loading-overlay hidden">
+            <div class="spinner"></div>
+            <p id="loading-message">Loading...</p>
+        </div>
+
+        <!-- Error Banner -->
+        <div id="error-banner" class="error-banner hidden">
+            <span id="error-message"></span>
+            <button id="dismiss-error" class="ms-Button ms-Button--icon">
+                <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--Cancel"></i></span>
+            </button>
+        </div>
+
+        <!-- Success Banner -->
+        <div id="success-banner" class="success-banner hidden">
+            <span id="success-message"></span>
+            <button id="dismiss-success" class="ms-Button ms-Button--icon">
+                <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--Cancel"></i></span>
+            </button>
+        </div>
+
+        <!-- Main Content Area -->
+        <main id="main-content">
+
+            <!-- RFQ WORKFLOW TAB -->
+            <section id="rfq-workflow-tab" class="tab-content active">
+                
+                <!-- Step 1: Select PR -->
+                <div id="step-select-pr" class="workflow-step">
+                    <h2 class="ms-font-l step-header">
+                        <span class="step-number">1</span>
+                        Select Purchase Requisition
+                    </h2>
+                    <div class="step-content">
+                        <div id="pr-list-container">
+                            <div class="search-box">
+                                <input type="text" id="pr-search" placeholder="Search PRs..." class="ms-TextField-field"/>
+                            </div>
+                            <div id="pr-list" class="selectable-list">
+                                <p class="placeholder-text">Click "Refresh" or "Load Mock PRs" to load data</p>
+                            </div>
+                        </div>
+                        <div id="selected-pr-info" class="selected-item-info hidden">
+                            <h3>Selected PR:</h3>
+                            <div id="pr-details"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 2: Select Suppliers -->
+                <div id="step-select-suppliers" class="workflow-step disabled">
+                    <h2 class="ms-font-l step-header">
+                        <span class="step-number">2</span>
+                        Select Suppliers
+                    </h2>
+                    <div class="step-content">
+                        <div id="supplier-list-container">
+                            <div class="list-header">
+                                <span id="supplier-count">0 suppliers found</span>
+                                <label class="select-all-label">
+                                    <input type="checkbox" id="select-all-suppliers"/>
+                                    Select All
+                                </label>
+                            </div>
+                            <div id="supplier-list" class="selectable-list checkbox-list">
+                            </div>
+                        </div>
+                        <button id="generate-rfqs-btn" class="ms-Button ms-Button--primary" disabled>
+                            <span class="ms-Button-label">Generate RFQs</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Step 3: Review & Send RFQs -->
+                <div id="step-review-rfqs" class="workflow-step disabled">
+                    <h2 class="ms-font-l step-header">
+                        <span class="step-number">3</span>
+                        Review & Send RFQs
+                    </h2>
+                    <div class="step-content">
+                        <div id="rfq-list" class="rfq-cards-container">
+                        </div>
+                        <div class="action-buttons">
+                            <button id="create-all-drafts-btn" class="ms-Button ms-Button--primary" disabled>
+                                <span class="ms-Button-label">Create All Drafts</span>
+                            </button>
+                            <button id="send-all-rfqs-btn" class="ms-Button ms-Button--primary" disabled>
+                                <span class="ms-Button-label">Send All RFQs</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+            </section>
+
+            <!-- EMAIL PROCESSING TAB -->
+            <section id="email-processing-tab" class="tab-content hidden">
+                <div id="current-email-section" class="email-section">
+                    <h2 class="ms-font-l">Current Email</h2>
+                    <div id="current-email-info" class="email-info-card">
+                        <p class="placeholder-text">Click "Simulate Email Context" to test</p>
+                    </div>
+                </div>
+                <div id="classification-section" class="email-section">
+                    <h2 class="ms-font-l">Classification</h2>
+                    <div id="classification-result" class="classification-card hidden">
+                        <div class="classification-badge" id="classification-badge"></div>
+                        <p id="classification-confidence"></p>
+                    </div>
+                    <button id="classify-email-btn" class="ms-Button ms-Button--primary">
+                        <span class="ms-Button-label">Classify Email</span>
+                    </button>
+                </div>
+                <div id="processing-section" class="email-section hidden">
+                    <h2 class="ms-font-l">Actions</h2>
+                    <div id="quote-processing" class="processing-card hidden">
+                        <h3>Quote Detected</h3>
+                        <button id="extract-quote-btn" class="ms-Button ms-Button--primary">
+                            <span class="ms-Button-label">Extract Quote</span>
+                        </button>
+                        <div id="extracted-quote-details" class="quote-details hidden"></div>
+                    </div>
+                    <div id="clarification-processing" class="processing-card hidden">
+                        <h3>Clarification Request</h3>
+                        <div id="clarification-details">
+                            <p><strong>Sub-classification:</strong> <span id="sub-classification"></span></p>
+                            <p><strong>Question:</strong></p>
+                            <div id="clarification-question" class="question-box"></div>
+                        </div>
+                        <div id="procurement-response" class="hidden">
+                            <h4>Suggested Response:</h4>
+                            <textarea id="suggested-response" class="ms-TextField-field" rows="6"></textarea>
+                            <button id="send-response-btn" class="ms-Button ms-Button--primary">
+                                <span class="ms-Button-label">Create Draft Reply</span>
+                            </button>
+                        </div>
+                        <div id="engineering-forward" class="hidden">
+                            <button id="forward-to-engineering-btn" class="ms-Button ms-Button--primary">
+                                <span class="ms-Button-label">Forward to Engineering</span>
+                            </button>
+                        </div>
+                    </div>
+                    <div id="engineer-response-processing" class="processing-card hidden">
+                        <h3>Engineer Response Detected</h3>
+                        <button id="process-engineer-response-btn" class="ms-Button ms-Button--primary">
+                            <span class="ms-Button-label">Generate Supplier Response</span>
+                        </button>
+                        <div id="engineer-draft-response" class="hidden">
+                            <textarea id="engineer-draft-body" class="ms-TextField-field" rows="6"></textarea>
+                            <button id="create-engineer-draft-btn" class="ms-Button ms-Button--primary">
+                                <span class="ms-Button-label">Create Draft Reply</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- QUOTE COMPARISON TAB -->
+            <section id="quote-comparison-tab" class="tab-content hidden">
+                <div class="quote-comparison-header">
+                    <h2 class="ms-font-l">Quote Comparison</h2>
+                    <div class="rfq-selector">
+                        <label for="rfq-select">Select RFQ:</label>
+                        <select id="rfq-select" class="ms-Dropdown-select">
+                            <option value="">-- Select an RFQ --</option>
+                        </select>
+                    </div>
+                </div>
+                <div id="quotes-container" class="quotes-grid">
+                    <p class="placeholder-text">Select an RFQ to view and compare quotes</p>
+                </div>
+                <div id="quote-summary" class="quote-summary hidden">
+                    <h3>Summary</h3>
+                    <div id="summary-content"></div>
+                </div>
+            </section>
+
+        </main>
+
+        <!-- Settings Modal -->
+        <div id="settings-modal" class="modal hidden">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Settings</h2>
+                    <button id="close-settings" class="ms-Button ms-Button--icon">
+                        <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--Cancel"></i></span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="setting-group">
+                        <label for="api-url">Backend API URL:</label>
+                        <input type="text" id="api-url" class="ms-TextField-field" value="http://localhost:8000"/>
+                    </div>
+                    <div class="setting-group">
+                        <label for="engineering-email">Engineering Team Email:</label>
+                        <input type="email" id="engineering-email" class="ms-TextField-field" placeholder="engineering@company.com"/>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button id="save-settings" class="ms-Button ms-Button--primary">
+                        <span class="ms-Button-label">Save Settings</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- RFQ Preview Modal -->
+        <div id="rfq-preview-modal" class="modal hidden">
+            <div class="modal-content modal-large">
+                <div class="modal-header">
+                    <h2>RFQ Preview</h2>
+                    <button id="close-rfq-preview" class="ms-Button ms-Button--icon">
+                        <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--Cancel"></i></span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="rfq-preview-section">
+                        <label>To:</label>
+                        <input type="email" id="preview-to" class="ms-TextField-field" readonly/>
+                    </div>
+                    <div class="rfq-preview-section">
+                        <label>Subject:</label>
+                        <input type="text" id="preview-subject" class="ms-TextField-field"/>
+                    </div>
+                    <div class="rfq-preview-section">
+                        <label>Body:</label>
+                        <textarea id="preview-body" class="ms-TextField-field" rows="15"></textarea>
+                    </div>
+                    <div class="rfq-preview-section">
+                        <label>Attachments:</label>
+                        <div id="preview-attachments" class="attachments-list"></div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button id="create-draft-btn" class="ms-Button">
+                        <span class="ms-Button-label">Create Draft (simulated)</span>
+                    </button>
+                    <button id="finalize-send-btn" class="ms-Button ms-Button--primary">
+                        <span class="ms-Button-label">Finalize & Send (simulated)</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Load services -->
+    <script src="src/services/config.js"></script>
+    <script src="src/services/api-client.js"></script>
+    <script src="src/utils/helpers.js"></script>
+    
+    <!-- Mock Office.js and Email Operations for testing -->
+    <script>
+        // Mock Office.js
+        window.Office = {
+            onReady: function(callback) {
+                callback({ host: 'TestMode' });
+            },
+            context: {
+                mailbox: {
+                    item: null,
+                    userProfile: {
+                        emailAddress: 'test@example.com',
+                        displayName: 'Test User'
+                    }
+                }
+            },
+            HostType: { Outlook: 'Outlook' },
+            CoercionType: { Text: 'text', Html: 'html' },
+            AsyncResultStatus: { Succeeded: 'succeeded', Failed: 'failed' }
+        };
+
+        // Mock EmailOperations
+        window.EmailOperations = {
+            getCurrentItem: function() { return Office.context.mailbox.item; },
+            async getCurrentEmailDetails() {
+                if (Office.context.mailbox.item) {
+                    return Office.context.mailbox.item;
+                }
+                throw new Error('No email selected');
+            },
+            async getEmailChain() {
+                const item = Office.context.mailbox.item;
+                if (item) {
+                    return [{
+                        subject: item.subject,
+                        body: item.body,
+                        from_email: item.from,
+                        date: item.date || new Date().toISOString()
+                    }];
+                }
+                return [];
+            },
+            async createDraft(to, subject, body) {
+                console.log('Mock: Creating draft', { to, subject, body: body.substring(0, 100) + '...' });
+                alert(`Draft would be created:\nTo: ${to}\nSubject: ${subject}`);
+                return { success: true };
+            },
+            async createReplyDraft(body) {
+                console.log('Mock: Creating reply draft', body.substring(0, 100) + '...');
+                alert('Reply draft would be created');
+                return { success: true };
+            },
+            formatRfqBodyAsText(body) {
+                if (typeof body === 'string') return body;
+                let text = '';
+                if (body.greeting) text += body.greeting + '\n\n';
+                if (body.introduction) text += body.introduction + '\n\n';
+                if (body.material_details) {
+                    text += 'Material Details:\n';
+                    for (const [key, value] of Object.entries(body.material_details)) {
+                        text += `  - ${key}: ${value}\n`;
+                    }
+                }
+                if (body.closing) text += '\n' + body.closing;
+                return text;
+            },
+            formatBodyAsHtml(body) {
+                return '<div>' + String(body).replace(/\n/g, '<br>') + '</div>';
+            },
+            extractRfqId(subject) {
+                const match = subject.match(/RFQ-\d+/i);
+                return match ? match[0].toUpperCase() : null;
+            }
+        };
+
+        // Mock FolderManagement
+        window.FolderManagement = {
+            async initializeMaterialFolders(code) {
+                console.log('Mock: Would create folders for', code);
+                return true;
+            }
+        };
+
+        // Test helper functions
+        function loadMockPRs() {
+            const mockPRs = [
+                {
+                    pr_id: "PR-001",
+                    material: "MAT-12345",
+                    description: "Precision bearings for assembly line",
+                    quantities: 100,
+                    unit: "pcs",
+                    status: "open",
+                    created_date: "2024-01-15T10:30:00"
+                },
+                {
+                    pr_id: "PR-002",
+                    material: "MAT-67890",
+                    description: "Steel plates 10mm thick",
+                    quantities: 50,
+                    unit: "sheets",
+                    status: "open",
+                    created_date: "2024-01-16T14:00:00"
+                }
+            ];
+            
+            AppState.prs = mockPRs;
+            renderPRList(mockPRs);
+            Helpers.showSuccess('Mock PRs loaded');
+        }
+
+        function loadMockSuppliers() {
+            const mockSuppliers = [
+                {
+                    supplier_id: "SUP-001",
+                    name: "ABC Manufacturing Co.",
+                    email: "sales@abcmfg.com",
+                    contact_person: "John Smith",
+                    match_reason: "Standard supplier for bearings",
+                    match_score: 9
+                },
+                {
+                    supplier_id: "SUP-002",
+                    name: "XYZ Industrial",
+                    email: "orders@xyzind.com",
+                    contact_person: "Jane Doe",
+                    match_reason: "Competitive pricing",
+                    match_score: 7
+                },
+                {
+                    supplier_id: "SUP-003",
+                    name: "Global Parts Ltd",
+                    email: "procurement@globalparts.com",
+                    contact_person: "Bob Wilson",
+                    match_reason: "Fast delivery times",
+                    match_score: 6
+                }
+            ];
+            
+            AppState.suppliers = mockSuppliers;
+            renderSupplierList(mockSuppliers);
+            Helpers.enableStep(document.getElementById('step-select-suppliers'));
+            Helpers.showSuccess('Mock suppliers loaded');
+        }
+
+        function simulateEmailContext() {
+            Office.context.mailbox.item = {
+                subject: "RE: RFQ-001 - Quote for MAT-12345",
+                body: "Dear Procurement Team,\n\nPlease find our quotation below:\n\nPrice: $1,250.00 per unit\nDelivery: 4-6 weeks\nValidity: 30 days\n\nBest regards,\nSupplier",
+                from: "supplier@example.com",
+                to: ["procurement@company.com"],
+                date: new Date().toISOString(),
+                conversationId: "conv-123"
+            };
+            
+            // Update UI
+            const container = document.getElementById('current-email-info');
+            container.innerHTML = `
+                <div class="email-subject">${Office.context.mailbox.item.subject}</div>
+                <div class="email-from">From: ${Office.context.mailbox.item.from}</div>
+                <div class="email-date">${new Date().toLocaleString()}</div>
+            `;
+            
+            AppState.currentEmail = Office.context.mailbox.item;
+            Helpers.showSuccess('Email context simulated');
+        }
+
+        async function testBackendConnection() {
+            try {
+                Helpers.showLoading('Testing backend connection...');
+                const prs = await ApiClient.getOpenPRs();
+                Helpers.showSuccess(`Backend connected! Found ${prs.length} open PRs`);
+                if (prs.length > 0) {
+                    AppState.prs = prs;
+                    renderPRList(prs);
+                }
+            } catch (error) {
+                Helpers.showError('Backend connection failed: ' + error.message);
+            } finally {
+                Helpers.hideLoading();
+            }
+        }
+    </script>
+    
+    <!-- Load main app (modified to work in test mode) -->
+    <script>
+        // Simplified AppState
+        const AppState = {
+            prs: [],
+            selectedPR: null,
+            suppliers: [],
+            selectedSuppliers: [],
+            rfqs: [],
+            currentEmail: null,
+            classification: null,
+            processingResult: null,
+            availableRfqs: []
+        };
+
+        // Initialization
+        document.addEventListener('DOMContentLoaded', () => {
+            setupEventListeners();
+            console.log('Test mode initialized');
+        });
+
+        function setupEventListeners() {
+            // Navigation
+            document.querySelectorAll('.nav-tab').forEach(tab => {
+                tab.addEventListener('click', handleTabClick);
+            });
+
+            // Buttons
+            document.getElementById('refresh-btn')?.addEventListener('click', () => testBackendConnection());
+            document.getElementById('settings-btn')?.addEventListener('click', openSettingsModal);
+            document.getElementById('close-settings')?.addEventListener('click', closeSettingsModal);
+            document.getElementById('save-settings')?.addEventListener('click', saveSettings);
+            document.getElementById('pr-search')?.addEventListener('input', Helpers.debounce(handlePRSearch, 300));
+            document.getElementById('select-all-suppliers')?.addEventListener('change', handleSelectAllSuppliers);
+            document.getElementById('generate-rfqs-btn')?.addEventListener('click', handleGenerateRFQs);
+            document.getElementById('classify-email-btn')?.addEventListener('click', handleClassifyEmail);
+            document.getElementById('close-rfq-preview')?.addEventListener('click', closeRFQPreviewModal);
+            document.getElementById('create-draft-btn')?.addEventListener('click', handleCreateDraft);
+            document.getElementById('finalize-send-btn')?.addEventListener('click', handleFinalizeSend);
+            
+            // Dismiss buttons
+            document.getElementById('dismiss-error')?.addEventListener('click', () => {
+                Helpers.hideElement(document.getElementById('error-banner'));
+            });
+            document.getElementById('dismiss-success')?.addEventListener('click', () => {
+                Helpers.hideElement(document.getElementById('success-banner'));
+            });
+        }
+
+        function handleTabClick(event) {
+            const clickedTab = event.currentTarget;
+            const tabName = clickedTab.dataset.tab;
+            
+            document.querySelectorAll('.nav-tab').forEach(tab => tab.classList.remove('active'));
+            clickedTab.classList.add('active');
+            
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+                Helpers.hideElement(content);
+            });
+            
+            const targetContent = document.getElementById(`${tabName}-tab`);
+            if (targetContent) {
+                targetContent.classList.add('active');
+                Helpers.showElement(targetContent);
+            }
+        }
+
+        function renderPRList(prs) {
+            const container = document.getElementById('pr-list');
+            Helpers.clearChildren(container);
+            
+            if (prs.length === 0) {
+                container.innerHTML = '<p class="placeholder-text">No open PRs found</p>';
+                return;
+            }
+            
+            prs.forEach(pr => {
+                const item = document.createElement('div');
+                item.className = 'list-item';
+                item.dataset.prId = pr.pr_id;
+                item.innerHTML = `
+                    <div class="list-item-title">${Helpers.escapeHtml(pr.pr_id)}</div>
+                    <div class="list-item-subtitle">Material: ${Helpers.escapeHtml(pr.material || 'N/A')}</div>
+                    <div class="list-item-meta">Qty: ${pr.quantities || 'N/A'} ${pr.unit || ''}</div>
+                `;
+                item.addEventListener('click', () => handlePRSelect(pr));
+                container.appendChild(item);
+            });
+        }
+
+        async function handlePRSelect(pr) {
+            document.querySelectorAll('#pr-list .list-item').forEach(item => {
+                item.classList.toggle('selected', item.dataset.prId === pr.pr_id);
+            });
+            
+            AppState.selectedPR = pr;
+            
+            document.getElementById('pr-details').innerHTML = `
+                <p><strong>PR ID:</strong> ${pr.pr_id}</p>
+                <p><strong>Material:</strong> ${pr.material || 'N/A'}</p>
+                <p><strong>Quantity:</strong> ${pr.quantities || 'N/A'} ${pr.unit || ''}</p>
+            `;
+            Helpers.showElement(document.getElementById('selected-pr-info'));
+            
+            // Try to load suppliers from backend, fall back to mock
+            try {
+                Helpers.showLoading('Searching suppliers...');
+                const suppliers = await ApiClient.searchSuppliers(pr.pr_id, pr.material);
+                AppState.suppliers = suppliers;
+                renderSupplierList(suppliers);
+                Helpers.enableStep(document.getElementById('step-select-suppliers'));
+            } catch (error) {
+                console.log('Backend unavailable, using mock data');
+                loadMockSuppliers();
+            } finally {
+                Helpers.hideLoading();
+            }
+        }
+
+        function renderSupplierList(suppliers) {
+            const container = document.getElementById('supplier-list');
+            const countEl = document.getElementById('supplier-count');
+            
+            Helpers.clearChildren(container);
+            AppState.selectedSuppliers = [];
+            
+            if (countEl) countEl.textContent = `${suppliers.length} supplier(s) found`;
+            
+            suppliers.forEach(supplier => {
+                const scoreClass = Helpers.getMatchScoreClass(supplier.match_score);
+                const item = document.createElement('div');
+                item.className = 'list-item';
+                item.innerHTML = `
+                    <input type="checkbox" class="supplier-checkbox" data-supplier-id="${supplier.supplier_id}">
+                    <div class="supplier-info">
+                        <div class="list-item-title">
+                            ${Helpers.escapeHtml(supplier.name)}
+                            <span class="match-score ${scoreClass}">${supplier.match_score}/10</span>
+                        </div>
+                        <div class="list-item-subtitle">${Helpers.escapeHtml(supplier.email)}</div>
+                        <div class="list-item-meta">${Helpers.escapeHtml(supplier.match_reason || '')}</div>
+                    </div>
+                `;
+                
+                item.querySelector('.supplier-checkbox').addEventListener('change', function() {
+                    handleSupplierCheckboxChange(this);
+                });
+                
+                container.appendChild(item);
+            });
+            
+            updateGenerateRFQsButton();
+        }
+
+        function handleSupplierCheckboxChange(checkbox) {
+            const supplierId = checkbox.dataset.supplierId;
+            if (checkbox.checked) {
+                if (!AppState.selectedSuppliers.includes(supplierId)) {
+                    AppState.selectedSuppliers.push(supplierId);
+                }
+            } else {
+                AppState.selectedSuppliers = AppState.selectedSuppliers.filter(id => id !== supplierId);
+            }
+            updateGenerateRFQsButton();
+        }
+
+        function handleSelectAllSuppliers(event) {
+            const isChecked = event.target.checked;
+            document.querySelectorAll('.supplier-checkbox').forEach(cb => {
+                cb.checked = isChecked;
+                handleSupplierCheckboxChange(cb);
+            });
+        }
+
+        function updateGenerateRFQsButton() {
+            const btn = document.getElementById('generate-rfqs-btn');
+            if (btn) {
+                btn.disabled = AppState.selectedSuppliers.length === 0;
+                btn.textContent = AppState.selectedSuppliers.length > 0
+                    ? `Generate RFQs (${AppState.selectedSuppliers.length})`
+                    : 'Generate RFQs';
+            }
+        }
+
+        async function handleGenerateRFQs() {
+            if (!AppState.selectedPR || AppState.selectedSuppliers.length === 0) {
+                Helpers.showError('Please select a PR and suppliers');
+                return;
+            }
+            
+            try {
+                Helpers.showLoading('Generating RFQs...');
+                const rfqs = await ApiClient.generateRFQs(AppState.selectedPR.pr_id, AppState.selectedSuppliers);
+                AppState.rfqs = rfqs;
+                Helpers.enableStep(document.getElementById('step-review-rfqs'));
+                renderRFQCards(rfqs);
+                Helpers.showSuccess(`${rfqs.length} RFQ(s) generated`);
+            } catch (error) {
+                // Generate mock RFQs if backend unavailable
+                const mockRfqs = AppState.selectedSuppliers.map((suppId, idx) => {
+                    const supplier = AppState.suppliers.find(s => s.supplier_id === suppId);
+                    return {
+                        rfq_id: `RFQ-00${idx + 1}`,
+                        supplier_id: suppId,
+                        supplier_name: supplier?.name || 'Unknown',
+                        supplier_email: supplier?.email || 'unknown@example.com',
+                        pr_id: AppState.selectedPR.pr_id,
+                        subject: `RFQ for ${AppState.selectedPR.material} - ${AppState.selectedPR.quantities} ${AppState.selectedPR.unit}`,
+                        body: {
+                            greeting: `Dear ${supplier?.contact_person || 'Sir/Madam'},`,
+                            introduction: 'We are requesting a quotation for the following materials:',
+                            material_details: {
+                                material_code: AppState.selectedPR.material,
+                                quantity: `${AppState.selectedPR.quantities} ${AppState.selectedPR.unit}`,
+                                description: AppState.selectedPR.description
+                            },
+                            closing: 'Please provide your best quotation.\n\nBest regards,\nProcurement Team'
+                        },
+                        attachments: [],
+                        status: 'draft'
+                    };
+                });
+                AppState.rfqs = mockRfqs;
+                Helpers.enableStep(document.getElementById('step-review-rfqs'));
+                renderRFQCards(mockRfqs);
+                Helpers.showSuccess(`${mockRfqs.length} mock RFQ(s) generated`);
+            } finally {
+                Helpers.hideLoading();
+            }
+        }
+
+        function renderRFQCards(rfqs) {
+            const container = document.getElementById('rfq-list');
+            Helpers.clearChildren(container);
+            
+            rfqs.forEach((rfq, idx) => {
+                const card = document.createElement('div');
+                card.className = 'rfq-card';
+                card.innerHTML = `
+                    <div class="rfq-card-header">
+                        <h4>${Helpers.escapeHtml(rfq.supplier_name)}</h4>
+                        <span class="rfq-status ${rfq.status}">${rfq.status}</span>
+                    </div>
+                    <div class="rfq-card-body">
+                        <p><strong>To:</strong> ${Helpers.escapeHtml(rfq.supplier_email)}</p>
+                        <p><strong>Subject:</strong> ${Helpers.escapeHtml(rfq.subject)}</p>
+                    </div>
+                    <div class="rfq-card-actions">
+                        <button class="ms-Button ms-Button--small" onclick="previewRFQ(${idx})">Preview</button>
+                        <button class="ms-Button ms-Button--small ms-Button--primary" onclick="createDraft(${idx})">Create Draft</button>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+            
+            document.getElementById('create-all-drafts-btn').disabled = false;
+        }
+
+        let currentPreviewIndex = null;
+
+        function previewRFQ(index) {
+            const rfq = AppState.rfqs[index];
+            currentPreviewIndex = index;
+            
+            document.getElementById('preview-to').value = rfq.supplier_email;
+            document.getElementById('preview-subject').value = rfq.subject;
+            document.getElementById('preview-body').value = EmailOperations.formatRfqBodyAsText(rfq.body);
+            
+            Helpers.showElement(document.getElementById('rfq-preview-modal'));
+        }
+
+        function closeRFQPreviewModal() {
+            Helpers.hideElement(document.getElementById('rfq-preview-modal'));
+        }
+
+        function handleCreateDraft() {
+            const rfq = AppState.rfqs[currentPreviewIndex];
+            EmailOperations.createDraft(
+                rfq.supplier_email,
+                document.getElementById('preview-subject').value,
+                document.getElementById('preview-body').value
+            );
+            closeRFQPreviewModal();
+        }
+
+        async function handleFinalizeSend() {
+            const rfq = AppState.rfqs[currentPreviewIndex];
+            try {
+                await ApiClient.finalizeRFQ(
+                    rfq.rfq_id,
+                    document.getElementById('preview-subject').value,
+                    document.getElementById('preview-body').value
+                );
+                Helpers.showSuccess('RFQ finalized');
+            } catch (e) {
+                console.log('Backend unavailable, simulating finalize');
+            }
+            await EmailOperations.createDraft(
+                rfq.supplier_email,
+                document.getElementById('preview-subject').value,
+                document.getElementById('preview-body').value
+            );
+            closeRFQPreviewModal();
+        }
+
+        function createDraft(index) {
+            const rfq = AppState.rfqs[index];
+            EmailOperations.createDraft(rfq.supplier_email, rfq.subject, EmailOperations.formatRfqBodyAsText(rfq.body));
+        }
+
+        async function handleClassifyEmail() {
+            if (!AppState.currentEmail) {
+                Helpers.showError('Please simulate email context first');
+                return;
+            }
+            
+            try {
+                Helpers.showLoading('Classifying...');
+                const result = await ApiClient.classifyEmail(
+                    await EmailOperations.getEmailChain(),
+                    {
+                        subject: AppState.currentEmail.subject,
+                        body: AppState.currentEmail.body,
+                        from_email: AppState.currentEmail.from,
+                        date: AppState.currentEmail.date
+                    },
+                    EmailOperations.extractRfqId(AppState.currentEmail.subject)
+                );
+                
+                AppState.classification = result;
+                
+                document.getElementById('classification-badge').textContent = result.classification.toUpperCase();
+                document.getElementById('classification-badge').className = `classification-badge ${result.classification}`;
+                document.getElementById('classification-confidence').textContent = `${Math.round(result.confidence * 100)}% confidence`;
+                
+                Helpers.showElement(document.getElementById('classification-result'));
+                Helpers.showElement(document.getElementById('processing-section'));
+                
+                if (result.classification === 'quote') {
+                    Helpers.showElement(document.getElementById('quote-processing'));
+                }
+                
+                Helpers.showSuccess('Email classified');
+            } catch (error) {
+                // Mock classification
+                const mockResult = { classification: 'quote', confidence: 0.92, email_id: 'EMAIL-001' };
+                AppState.classification = mockResult;
+                
+                document.getElementById('classification-badge').textContent = 'QUOTE';
+                document.getElementById('classification-badge').className = 'classification-badge quote';
+                document.getElementById('classification-confidence').textContent = '92% confidence';
+                
+                Helpers.showElement(document.getElementById('classification-result'));
+                Helpers.showElement(document.getElementById('processing-section'));
+                Helpers.showElement(document.getElementById('quote-processing'));
+                
+                Helpers.showSuccess('Email classified (mock)');
+            } finally {
+                Helpers.hideLoading();
+            }
+        }
+
+        function handlePRSearch(event) {
+            const term = event.target.value;
+            const filtered = Helpers.filterBySearch(AppState.prs, term, 'pr_id', 'material', 'description');
+            renderPRList(filtered);
+        }
+
+        function openSettingsModal() {
+            document.getElementById('api-url').value = Config.API_BASE_URL;
+            Helpers.showElement(document.getElementById('settings-modal'));
+        }
+
+        function closeSettingsModal() {
+            Helpers.hideElement(document.getElementById('settings-modal'));
+        }
+
+        function saveSettings() {
+            Config.saveSettings({ apiUrl: document.getElementById('api-url').value });
+            closeSettingsModal();
+            Helpers.showSuccess('Settings saved');
+        }
+
+        // Global functions for onclick handlers
+        window.previewRFQ = previewRFQ;
+        window.createDraft = createDraft;
+    </script>
+</body>
+</html>
