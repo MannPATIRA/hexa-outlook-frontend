@@ -83,6 +83,15 @@ const Config = {
         } catch (e) {
             return defaultValue;
         }
+    },
+
+    // Set a single setting value
+    setSetting(key, value) {
+        try {
+            localStorage.setItem(key, value);
+        } catch (e) {
+            console.log('Could not save setting to localStorage:', e);
+        }
     }
 };
 

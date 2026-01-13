@@ -25,7 +25,7 @@
   <!-- Minimum API requirements -->
   <Requirements>
     <Sets>
-      <Set Name="Mailbox" MinVersion="1.3"/>
+      <Set Name="Mailbox" MinVersion="1.5"/>
     </Sets>
   </Requirements>
 
@@ -45,6 +45,7 @@
   <!-- Activation rules - when the add-in appears -->
   <Rule xsi:type="RuleCollection" Mode="Or">
     <Rule xsi:type="ItemIs" ItemType="Message" FormType="Read"/>
+    <Rule xsi:type="ItemIs" ItemType="Message" FormType="Edit"/>
   </Rule>
 
   <!-- Version overrides for modern Outlook features -->
@@ -52,7 +53,7 @@
     <VersionOverrides xmlns="http://schemas.microsoft.com/office/mailappversionoverrides/1.1" xsi:type="VersionOverridesV1_1">
       
       <Requirements>
-        <bt:Sets DefaultMinVersion="1.3">
+        <bt:Sets DefaultMinVersion="1.5">
           <bt:Set Name="Mailbox"/>
         </bt:Sets>
       </Requirements>
@@ -86,23 +87,7 @@
                     </Icon>
                     <Action xsi:type="ShowTaskpane">
                       <SourceLocation resid="Taskpane.Url"/>
-                    </Action>
-                  </Control>
-
-                  <!-- Classify Email Button -->
-                  <Control xsi:type="Button" id="ClassifyEmailBtn">
-                    <Label resid="ClassifyBtn.Label"/>
-                    <Supertip>
-                      <Title resid="ClassifyBtn.Label"/>
-                      <Description resid="ClassifyBtn.Tooltip"/>
-                    </Supertip>
-                    <Icon>
-                      <bt:Image size="16" resid="Icon.16x16"/>
-                      <bt:Image size="32" resid="Icon.32x32"/>
-                      <bt:Image size="80" resid="Icon.80x80"/>
-                    </Icon>
-                    <Action xsi:type="ExecuteFunction">
-                      <FunctionName>classifyCurrentEmail</FunctionName>
+                      <SupportsPinning>true</SupportsPinning>
                     </Action>
                   </Control>
 
@@ -129,6 +114,7 @@
                     </Icon>
                     <Action xsi:type="ShowTaskpane">
                       <SourceLocation resid="Taskpane.Url"/>
+                      <SupportsPinning>true</SupportsPinning>
                     </Action>
                   </Control>
 

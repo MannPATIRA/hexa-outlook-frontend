@@ -319,6 +319,59 @@ const FolderManagement = {
     },
 
     /**
+     * Get folder path for an email by its folder ID
+     * Returns the full path like "MAT-12345/Quotes"
+     */
+    async getFolderPath(folderId) {
+        if (!AuthService.isSignedIn() || !folderId) {
+            return '';
+        }
+
+        try {
+            const pathParts = [];
+            let currentFolderId = folderId;
+            let maxDepth = 5; // Prevent infinite loops
+
+            while (currentFolderId && maxDepth > 0) {
+                const folder = await AuthService.graphRequest(`/me/mailFolders/${currentFolderId}?$select=displayName,parentFolderId`);
+                
+                if (!folder) break;
+                
+                pathParts.unshift(folder.displayName);
+                
+                // Stop if we've reached the root (Inbox, etc.)
+                if (!folder.parentFolderId || folder.displayName === 'Inbox') {
+                    break;
+                }
+                
+                currentFolderId = folder.parentFolderId;
+                maxDepth--;
+            }
+
+            return pathParts.join('/');
+        } catch (error) {
+            console.error('Error getting folder path:', error);
+            return '';
+        }
+    },
+
+    /**
+     * Get folder info by ID
+     */
+    async getFolderById(folderId) {
+        if (!AuthService.isSignedIn() || !folderId) {
+            return null;
+        }
+
+        try {
+            return await AuthService.graphRequest(`/me/mailFolders/${folderId}?$select=id,displayName,parentFolderId`);
+        } catch (error) {
+            console.error('Error getting folder by ID:', error);
+            return null;
+        }
+    },
+
+    /**
      * Get folder structure for a material
      */
     getFolderStructure(materialCode) {

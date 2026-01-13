@@ -65,6 +65,13 @@ const Helpers = {
     },
 
     /**
+     * Strip HTML tags from text (alias for htmlToText)
+     */
+    stripHtml(html) {
+        return this.htmlToText(html);
+    },
+
+    /**
      * Debounce function calls
      */
     debounce(func, wait = 300) {

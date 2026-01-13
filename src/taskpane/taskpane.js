@@ -22,37 +22,1656 @@ const AppState = {
     // Email processing result
     processingResult: null,
     // Available RFQs for quote comparison
-    availableRfqs: []
+    availableRfqs: [],
+    // Current context mode (rfq-workflow, draft, clarification, quote)
+    currentMode: 'rfq-workflow',
+    // Current email context details
+    emailContext: null
 };
 
+// ==================== STATE PERSISTENCE ====================
+const STATE_KEY = 'procurement_addin_state';
+
+function persistState(state) {
+    try {
+        const existing = getPersistedState();
+        const merged = { ...existing, ...state, timestamp: Date.now() };
+        localStorage.setItem(STATE_KEY, JSON.stringify(merged));
+        console.log('State persisted:', merged);
+    } catch (e) {
+        console.error('Failed to persist state:', e);
+    }
+}
+
+function getPersistedState() {
+    try {
+        const stored = localStorage.getItem(STATE_KEY);
+        return stored ? JSON.parse(stored) : {};
+    } catch (e) {
+        console.error('Failed to get persisted state:', e);
+        return {};
+    }
+}
+
+function clearPersistedState() {
+    try {
+        localStorage.removeItem(STATE_KEY);
+        console.log('Persisted state cleared');
+    } catch (e) {
+        console.error('Failed to clear persisted state:', e);
+    }
+}
+
+function restorePersistedState() {
+    const state = getPersistedState();
+    
+    // Check if we just completed sending (add-in reopened after sending current draft)
+    if (state.showSuccessOnReopen || state.lastSendResult === 'success') {
+        const sent = state.sentCount || 0;
+        const autoReplies = state.autoRepliesScheduled || 0;
+        
+        // Show success banner
+        const successMessage = autoReplies > 0 
+            ? `✓ Sent ${sent} RFQ(s) successfully! ${autoReplies} auto-replies scheduled - watch your inbox!`
+            : `✓ Sent ${sent} RFQ(s) successfully!`;
+        
+        Helpers.showSuccess(successMessage);
+        console.log('Restored state:', successMessage);
+        
+        // Clear the success flag but keep other state
+        clearPersistedState();
+        return true; // Indicate state was restored
+    }
+    
+    // Check if we were in the middle of sending (interrupted)
+    if (state.sendingInProgress) {
+        const sent = state.sentCount || 0;
+        const total = state.totalDrafts || 0;
+        
+        if (sent > 0) {
+            Helpers.showSuccess(`Sent ${sent}/${total} RFQ(s) before interruption. Please check your Sent RFQs folder.`);
+        } else {
+            Helpers.showError('Sending was interrupted. Please try again.');
+        }
+        clearPersistedState();
+        return true;
+    }
+    
+    // Handle partial success
+    if (state.lastSendResult === 'partial') {
+        Helpers.showSuccess(`Most RFQs sent successfully. Some may need to be resent.`);
+        clearPersistedState();
+        return true;
+    }
+    
+    // Restore workflow state if recent (within last hour)
+    const oneHourAgo = Date.now() - (60 * 60 * 1000);
+    if (state.timestamp && state.timestamp > oneHourAgo) {
+        if (state.selectedPR) {
+            AppState.selectedPR = state.selectedPR;
+            console.log('Restored selected PR:', state.selectedPR);
+        }
+        if (state.rfqs && state.rfqs.length > 0) {
+            AppState.rfqs = state.rfqs;
+            console.log('Restored RFQs:', state.rfqs.length);
+        }
+        if (state.currentStep) {
+            console.log('Restored to step:', state.currentStep);
+        }
+    }
+    
+    return false;
+}
+
+// ==================== CONTEXT DETECTION ====================
+/**
+ * Detect the current email context to determine which UI mode to show
+ * Returns: { type: 'draft'|'clarification'|'quote'|'normal'|'no-email', email?, item? }
+ */
+/**
+ * Get all replies in a conversation, excluding emails from the current user
+ * @param {string} conversationId - The conversation ID
+ * @param {string} userEmail - The current user's email to exclude
+ * @returns {Array} Array of reply emails, sorted by date descending (most recent first)
+ */
+async function getConversationReplies(conversationId, userEmail) {
+    if (!conversationId || !AuthService.isSignedIn()) {
+        return [];
+    }
+    
+    try {
+        console.log('Fetching conversation replies for:', conversationId);
+        
+        // Escape special characters in conversationId for OData filter
+        const escapedConvId = conversationId.replace(/'/g, "''");
+        
+        // Fetch all emails in this conversation
+        // Note: Personal Outlook accounts don't support $filter + $orderby together
+        // so we fetch without orderby and sort in JavaScript
+        const response = await AuthService.graphRequest(
+            `/me/messages?$filter=conversationId eq '${escapedConvId}'&$select=id,subject,from,parentFolderId,categories,body,receivedDateTime,conversationId&$top=50`
+        );
+        
+        if (!response.value || response.value.length === 0) {
+            console.log('No emails found in conversation');
+            return [];
+        }
+        
+        console.log(`Found ${response.value.length} emails in conversation`);
+        
+        // Filter out emails from the current user (only keep supplier replies)
+        const userEmailLower = userEmail.toLowerCase();
+        const replies = response.value.filter(email => {
+            const fromAddress = email.from?.emailAddress?.address?.toLowerCase() || '';
+            return fromAddress !== userEmailLower;
+        });
+        
+        // Sort by receivedDateTime descending (most recent first)
+        replies.sort((a, b) => new Date(b.receivedDateTime) - new Date(a.receivedDateTime));
+        
+        console.log(`Found ${replies.length} replies from other senders`);
+        return replies;
+        
+    } catch (error) {
+        console.error('Error fetching conversation replies:', error);
+        return [];
+    }
+}
+
+/**
+ * Check if an email is classified as a quote (via category or folder)
+ */
+function isQuoteEmail(email) {
+    // Check categories
+    const categories = email.categories || [];
+    if (categories.some(c => c && c.toUpperCase().includes('QUOTE'))) {
+        return true;
+    }
+    return false;
+}
+
+/**
+ * Check if an email is classified as a clarification (via category or folder)
+ */
+function isClarificationEmail(email) {
+    // Check categories
+    const categories = email.categories || [];
+    if (categories.some(c => c && (
+        c.toUpperCase().includes('CLARIFICATION') || 
+        c.toUpperCase().includes('YELLOW')
+    ))) {
+        return true;
+    }
+    return false;
+}
+
+/**
+ * Check if an email is a Sent RFQ (via category or folder path)
+ */
+function isSentRfqEmail(email, folderPath) {
+    // Check categories for "SENT RFQ"
+    const categories = email.categories || [];
+    if (categories.some(c => c && c.toUpperCase().includes('SENT RFQ'))) {
+        return true;
+    }
+    
+    // Check folder path
+    if (folderPath) {
+        const lowerPath = folderPath.toLowerCase();
+        if (lowerPath.includes('sent rfq')) {
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+async function detectEmailContext() {
+    console.log('=== Detecting email context ===');
+    
+    // Check if we have an email selected
+    if (!Office.context || !Office.context.mailbox) {
+        console.log('No Office context available');
+        return { type: 'normal' };
+    }
+
+    const item = Office.context.mailbox.item;
+    
+    if (!item) {
+        console.log('No email item selected');
+        return { type: 'normal' };
+    }
+
+    // Check if we're in compose mode (draft)
+    try {
+        const itemType = item.itemType;
+        console.log('Item type:', itemType);
+        
+        // Check if this is a compose (draft) context
+        // In compose mode, item.body.setAsync exists (for writing)
+        if (item.body && typeof item.body.setAsync === 'function') {
+            console.log('Detected compose mode (setAsync available)');
+            
+            // Get subject - in compose mode this might be async or sync depending on version
+            let subject = '';
+            if (typeof item.subject === 'string') {
+                subject = item.subject;
+            } else if (item.subject && typeof item.subject.getAsync === 'function') {
+                // Async subject access
+                subject = await new Promise((resolve) => {
+                    item.subject.getAsync((result) => {
+                        resolve(result.status === Office.AsyncResultStatus.Succeeded ? result.value : '');
+                    });
+                });
+            }
+            
+            console.log('Draft subject:', subject);
+            
+            // Check if this is an RFQ draft
+            if (subject && subject.includes('RFQ')) {
+                console.log('>>> Detected RFQ draft mode');
+                return { type: 'draft', item: item };
+            } else {
+                // Still a draft, but not an RFQ - show draft mode anyway for any compose
+                console.log('>>> Detected non-RFQ draft/compose mode');
+                return { type: 'draft', item: item };
+            }
+        }
+    } catch (e) {
+        console.log('Error checking compose mode:', e);
+    }
+
+    // For read mode, check categories and folder
+    if (!AuthService.isSignedIn()) {
+        console.log('Not signed in - showing normal mode');
+        return { type: 'normal', item: item };
+    }
+
+    try {
+        // Get email ID - may need to convert REST ID
+        let emailId = item.itemId;
+        
+        if (!emailId) {
+            console.log('No email ID available - showing normal mode');
+            return { type: 'normal', item: item };
+        }
+
+        console.log('Email ID (raw):', emailId.substring(0, 50) + '...');
+
+        // Try to get email details (including conversationId for thread detection)
+        let email = null;
+        try {
+            email = await AuthService.graphRequest(
+                `/me/messages/${emailId}?$select=id,subject,from,parentFolderId,categories,body,receivedDateTime,conversationId`
+            );
+        } catch (graphError) {
+            console.error('Graph API error getting email:', graphError);
+            // Try converting the ID format
+            if (Office.context.mailbox.convertToRestId) {
+                try {
+                    const restId = Office.context.mailbox.convertToRestId(
+                        emailId, 
+                        Office.MailboxEnums.RestVersion.v2_0
+                    );
+                    console.log('Converted to REST ID:', restId.substring(0, 50) + '...');
+                    email = await AuthService.graphRequest(
+                        `/me/messages/${restId}?$select=id,subject,from,parentFolderId,categories,body,receivedDateTime,conversationId`
+                    );
+                } catch (convertError) {
+                    console.error('Error with converted ID:', convertError);
+                }
+            }
+        }
+
+        if (!email) {
+            console.log('Could not fetch email details - showing normal mode');
+            return { type: 'normal', item: item };
+        }
+
+        console.log('Email details:', {
+            subject: email.subject,
+            categories: email.categories,
+            parentFolderId: email.parentFolderId ? email.parentFolderId.substring(0, 30) + '...' : null
+        });
+
+        // Check categories for classification
+        const categories = email.categories || [];
+        
+        // Quote detection
+        if (categories.some(c => c && c.toUpperCase().includes('QUOTE'))) {
+            console.log('>>> Detected QUOTE email via category');
+            return { type: 'quote', email: email, item: item };
+        }
+        
+        // Clarification detection
+        if (categories.some(c => c && (
+            c.toUpperCase().includes('CLARIFICATION') || 
+            c.toUpperCase().includes('YELLOW')
+        ))) {
+            console.log('>>> Detected CLARIFICATION email via category');
+            return { type: 'clarification', email: email, item: item };
+        }
+
+        // Check folder - get both the immediate folder name AND the full path
+        let folderPath = '';
+        let folderName = '';
+        const userEmail = Office.context.mailbox.userProfile?.emailAddress?.toLowerCase() || '';
+        const emailFrom = email.from?.emailAddress?.address?.toLowerCase() || '';
+        const isOwnEmail = userEmail && emailFrom && emailFrom === userEmail;
+        
+        console.log('=== Folder Detection ===');
+        console.log('User email:', userEmail);
+        console.log('Email from:', emailFrom);
+        console.log('Is own email:', isOwnEmail);
+        console.log('Conversation ID:', email.conversationId ? 'present' : 'MISSING');
+        
+        if (email.parentFolderId) {
+            try {
+                // First, get the immediate folder name directly (more reliable)
+                const folderInfo = await AuthService.graphRequest(
+                    `/me/mailFolders/${email.parentFolderId}?$select=displayName`
+                );
+                folderName = folderInfo?.displayName?.toLowerCase() || '';
+                console.log('Immediate folder name:', folderName);
+                
+                // Also try to get full path for deeper matching
+                try {
+                    folderPath = await FolderManagement.getFolderPath(email.parentFolderId);
+                    console.log('Full folder path:', folderPath);
+                } catch (pathErr) {
+                    console.log('Could not get full path, using folder name only');
+                }
+            } catch (folderErr) {
+                console.error('Error getting folder info:', folderErr);
+            }
+        }
+        
+        // Check for Quotes folder (by immediate name OR full path)
+        const lowerPath = folderPath.toLowerCase();
+        const isInQuotesFolder = folderName.includes('quote') || lowerPath.includes('quote');
+        const isInClarificationFolder = folderName.includes('clarification') || lowerPath.includes('clarification');
+        const isInEngineerFolder = folderName.includes('engineer') || lowerPath.includes('engineer');
+        
+        console.log('Folder detection results:', { isInQuotesFolder, isInClarificationFolder, isInEngineerFolder });
+        
+        if (isInQuotesFolder) {
+            console.log('>>> IN QUOTES FOLDER - switching to Quote mode');
+            
+            // If this is our own sent email, try to find the actual supplier reply
+            if (isOwnEmail && email.conversationId) {
+                console.log('>>> This is user sent email - looking for supplier quote reply...');
+                try {
+                    const replies = await getConversationReplies(email.conversationId, userEmail);
+                    console.log('>>> Found', replies.length, 'supplier replies');
+                    if (replies.length > 0) {
+                        console.log('>>> Using supplier reply for Quote mode');
+                        return { type: 'quote', email: replies[0], item: item, originalRfq: email };
+                    }
+                } catch (replyErr) {
+                    console.error('Error getting replies:', replyErr);
+                }
+            }
+            
+            // Return quote mode with current email
+            console.log('>>> Returning Quote mode with current email');
+            return { type: 'quote', email: email, item: item };
+        }
+        
+        if (isInClarificationFolder) {
+            console.log('>>> IN CLARIFICATION FOLDER - switching to Clarification mode');
+            
+            // If this is our own sent email, try to find the actual supplier reply
+            if (isOwnEmail && email.conversationId) {
+                console.log('>>> This is user sent email - looking for supplier clarification...');
+                try {
+                    const replies = await getConversationReplies(email.conversationId, userEmail);
+                    console.log('>>> Found', replies.length, 'supplier replies');
+                    if (replies.length > 0) {
+                        console.log('>>> Using supplier reply for Clarification mode');
+                        return { type: 'clarification', email: replies[0], item: item, originalRfq: email };
+                    }
+                } catch (replyErr) {
+                    console.error('Error getting replies:', replyErr);
+                }
+            }
+            
+            console.log('>>> Returning Clarification mode with current email');
+            return { type: 'clarification', email: email, item: item };
+        }
+        
+        if (isInEngineerFolder) {
+            console.log('>>> IN ENGINEER FOLDER - switching to Clarification mode');
+            return { type: 'clarification', email: email, item: item };
+        }
+
+        // ============================================================
+        // SMART CONVERSATION DETECTION FOR SENT RFQs
+        // If this is a sent RFQ, check if there are replies in the conversation
+        // and show the appropriate mode based on the reply classification
+        // ============================================================
+        if (isSentRfqEmail(email, folderPath)) {
+            console.log('>>> Detected SENT RFQ email - checking for conversation replies...');
+            
+            // Get the current user's email address
+            const userEmail = Office.context.mailbox.userProfile?.emailAddress || '';
+            
+            if (email.conversationId && userEmail) {
+                try {
+                    const replies = await getConversationReplies(email.conversationId, userEmail);
+                    
+                    if (replies.length > 0) {
+                        console.log(`Found ${replies.length} supplier replies in conversation`);
+                        
+                        // Check each reply for classification (most recent first)
+                        for (const reply of replies) {
+                            // First check if it's classified as a quote
+                            if (isQuoteEmail(reply)) {
+                                console.log('>>> Found QUOTE reply in conversation - switching to Quote mode');
+                                return { 
+                                    type: 'quote', 
+                                    email: reply, 
+                                    item: item, 
+                                    originalRfq: email 
+                                };
+                            }
+                            
+                            // Then check if it's classified as a clarification
+                            if (isClarificationEmail(reply)) {
+                                console.log('>>> Found CLARIFICATION reply in conversation - switching to Clarification mode');
+                                return { 
+                                    type: 'clarification', 
+                                    email: reply, 
+                                    item: item, 
+                                    originalRfq: email 
+                                };
+                            }
+                        }
+                        
+                        // Check folder location of replies as fallback
+                        for (const reply of replies) {
+                            if (reply.parentFolderId) {
+                                try {
+                                    const replyFolderPath = await FolderManagement.getFolderPath(reply.parentFolderId);
+                                    const lowerReplyPath = replyFolderPath.toLowerCase();
+                                    
+                                    if (lowerReplyPath.includes('quote')) {
+                                        console.log('>>> Found reply in Quotes folder - switching to Quote mode');
+                                        return { 
+                                            type: 'quote', 
+                                            email: reply, 
+                                            item: item, 
+                                            originalRfq: email 
+                                        };
+                                    }
+                                    
+                                    if (lowerReplyPath.includes('clarification')) {
+                                        console.log('>>> Found reply in Clarification folder - switching to Clarification mode');
+                                        return { 
+                                            type: 'clarification', 
+                                            email: reply, 
+                                            item: item, 
+                                            originalRfq: email 
+                                        };
+                                    }
+                                } catch (e) {
+                                    console.log('Could not get reply folder path:', e);
+                                }
+                            }
+                        }
+                        
+                        // If we have unclassified replies, show the most recent one as a quote
+                        // (most supplier replies are quotes)
+                        console.log('>>> Found unclassified reply - showing as Quote mode by default');
+                        return { 
+                            type: 'quote', 
+                            email: replies[0], 
+                            item: item, 
+                            originalRfq: email 
+                        };
+                    } else {
+                        console.log('No supplier replies found in conversation - showing RFQ workflow');
+                    }
+                } catch (convError) {
+                    console.error('Error checking conversation replies:', convError);
+                }
+            }
+        }
+
+        console.log('No special context detected - showing normal mode');
+        return { type: 'normal', email: email, item: item };
+
+    } catch (error) {
+        console.error('Error detecting email context:', error);
+        console.error('Stack:', error.stack);
+        return { type: 'normal', item: item };
+    }
+}
+
+// ==================== MODE RENDERING ====================
+/**
+ * Hide all mode containers and show main content
+ */
+function hideAllModes() {
+    // Hide all mode containers
+    const modeContainers = ['draft-mode', 'clarification-mode', 'quote-mode'];
+    modeContainers.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.classList.add('hidden');
+    });
+    
+    // Show nav tabs and main content
+    const navTabs = document.querySelector('.nav-tabs');
+    const mainContent = document.getElementById('main-content');
+    if (navTabs) navTabs.style.display = 'flex';
+    if (mainContent) mainContent.style.display = 'block';
+}
+
+/**
+ * Show a specific mode and hide the normal workflow
+ */
+function showMode(modeId) {
+    console.log('showMode called with:', modeId);
+    
+    try {
+        // Hide nav tabs and main content
+        const navTabs = document.querySelector('.nav-tabs');
+        const mainContent = document.getElementById('main-content');
+        if (navTabs) navTabs.style.display = 'none';
+        if (mainContent) mainContent.style.display = 'none';
+        
+        // Hide all mode containers first
+        const modeContainers = ['draft-mode', 'clarification-mode', 'quote-mode'];
+        modeContainers.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.classList.add('hidden');
+        });
+        
+        // Show the requested mode
+        const modeEl = document.getElementById(modeId);
+        if (modeEl) {
+            modeEl.classList.remove('hidden');
+            console.log('Mode element shown:', modeId);
+        } else {
+            console.error('Mode element not found:', modeId);
+            // Fallback - show main content
+            if (mainContent) mainContent.style.display = 'block';
+            if (navTabs) navTabs.style.display = 'flex';
+        }
+    } catch (error) {
+        console.error('Error in showMode:', error);
+        // Try to show main content as fallback
+        const mainContent = document.getElementById('main-content');
+        if (mainContent) mainContent.style.display = 'block';
+    }
+}
+
+/**
+ * Render UI based on detected email context
+ */
+async function renderContextUI(context) {
+    console.log('Rendering context UI for type:', context?.type);
+    
+    try {
+        AppState.emailContext = context;
+        AppState.currentMode = context?.type || 'normal';
+        
+        switch (context?.type) {
+            case 'draft':
+                try {
+                    await showDraftMode(context);
+                } catch (e) {
+                    console.error('Error showing draft mode:', e);
+                    showRFQWorkflowMode();
+                }
+                break;
+            case 'clarification':
+                try {
+                    await showClarificationMode(context);
+                } catch (e) {
+                    console.error('Error showing clarification mode:', e);
+                    showRFQWorkflowMode();
+                }
+                break;
+            case 'quote':
+                try {
+                    await showQuoteMode(context);
+                } catch (e) {
+                    console.error('Error showing quote mode:', e);
+                    showRFQWorkflowMode();
+                }
+                break;
+            case 'normal':
+            case 'no-email':
+            default:
+                showRFQWorkflowMode();
+                break;
+        }
+    } catch (error) {
+        console.error('Error in renderContextUI:', error);
+        showRFQWorkflowMode();
+    }
+}
+
+/**
+ * Show RFQ Workflow mode (normal mode)
+ */
+function showRFQWorkflowMode() {
+    console.log('Showing RFQ Workflow mode');
+    hideAllModes();
+    AppState.currentMode = 'rfq-workflow';
+}
+
+/**
+ * Show Draft mode when user is viewing a draft email
+ */
+async function showDraftMode(context) {
+    console.log('Showing Draft mode');
+    showMode('draft-mode');
+    AppState.currentMode = 'draft';
+    
+    // Load pending RFQ drafts
+    await loadPendingDrafts();
+}
+
+/**
+ * Load and display pending RFQ drafts
+ */
+async function loadPendingDrafts() {
+    const listContainer = document.getElementById('pending-drafts-list');
+    if (!listContainer) return;
+    
+    listContainer.innerHTML = '<p class="loading-text">Loading drafts...</p>';
+    
+    if (!AuthService.isSignedIn()) {
+        listContainer.innerHTML = '<p class="loading-text">Please sign in to view drafts</p>';
+        return;
+    }
+    
+    try {
+        // Get drafts from the Drafts folder that look like RFQs
+        const drafts = await AuthService.graphRequest(
+            `/me/mailFolders/Drafts/messages?$filter=startswith(subject,'RFQ for')&$select=id,subject,toRecipients,createdDateTime&$top=20&$orderby=createdDateTime desc`
+        );
+        
+        if (!drafts.value || drafts.value.length === 0) {
+            listContainer.innerHTML = '<p class="loading-text">No RFQ drafts found. Generate RFQs in the workflow first.</p>';
+            return;
+        }
+        
+        // Render the drafts
+        listContainer.innerHTML = drafts.value.map(draft => {
+            const recipient = draft.toRecipients?.[0]?.emailAddress?.name || 
+                             draft.toRecipients?.[0]?.emailAddress?.address || 
+                             'Unknown';
+            return `
+                <div class="draft-item" data-draft-id="${draft.id}">
+                    <div class="draft-item-info">
+                        <div class="draft-item-supplier">${Helpers.escapeHtml(recipient)}</div>
+                        <div class="draft-item-subject">${Helpers.escapeHtml(draft.subject)}</div>
+                    </div>
+                    <span class="draft-item-status">Draft</span>
+                </div>
+            `;
+        }).join('');
+        
+        // Enable send button
+        const sendBtn = document.getElementById('send-all-drafts-btn');
+        if (sendBtn) sendBtn.disabled = false;
+        
+    } catch (error) {
+        console.error('Error loading drafts:', error);
+        listContainer.innerHTML = '<p class="loading-text">Error loading drafts. Please try again.</p>';
+    }
+}
+
+/**
+ * Show Clarification mode when user clicks on a clarification email
+ */
+async function showClarificationMode(context) {
+    console.log('=== Showing Clarification mode ===');
+    
+    try {
+        showMode('clarification-mode');
+        AppState.currentMode = 'clarification';
+        
+        const email = context.email;
+        const originalRfq = context.originalRfq; // May be present if opened from sent RFQ
+        
+        if (!email) {
+            console.error('No email data in context');
+            // Still show the mode but with a message
+            const emailInfoBox = document.getElementById('clarification-email-info');
+            if (emailInfoBox) {
+                emailInfoBox.innerHTML = '<p class="error-text">Could not load email details</p>';
+            }
+            return;
+        }
+        
+        // Display email info
+        const emailInfoBox = document.getElementById('clarification-email-info');
+        if (emailInfoBox) {
+            const fromAddress = email.from?.emailAddress?.address || 'Unknown sender';
+            const fromName = email.from?.emailAddress?.name || fromAddress;
+            const dateStr = email.receivedDateTime ? 
+                new Date(email.receivedDateTime).toLocaleString() : 'Unknown date';
+            
+            let html = `
+                <div class="email-subject">${Helpers.escapeHtml(email.subject || 'No subject')}</div>
+                <div class="email-from">From: ${Helpers.escapeHtml(fromName)} &lt;${Helpers.escapeHtml(fromAddress)}&gt;</div>
+                <div class="email-date">Received: ${dateStr}</div>
+            `;
+            
+            // If we have the original RFQ context, show it
+            if (originalRfq) {
+                html += `
+                    <div class="original-rfq-info" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #ddd; font-size: 12px; color: #666;">
+                        <div><strong>In reply to your RFQ:</strong></div>
+                        <div>${Helpers.escapeHtml(originalRfq.subject || 'Unknown subject')}</div>
+                    </div>
+                `;
+            }
+            
+            emailInfoBox.innerHTML = html;
+        }
+        
+        // Extract and display the question
+        const questionBox = document.getElementById('clarification-question-text');
+        if (questionBox) {
+            if (email.body?.content) {
+                const bodyText = Helpers.stripHtml(email.body.content);
+                const truncatedBody = bodyText.length > 500 ? bodyText.substring(0, 500) + '...' : bodyText;
+                questionBox.textContent = truncatedBody;
+            } else {
+                questionBox.textContent = 'Email body not available';
+            }
+        }
+        
+        // Get suggested response from API (don't await - let it load in background)
+        loadSuggestedResponse(email).catch(err => {
+            console.error('Error loading suggested response:', err);
+        });
+        
+    } catch (error) {
+        console.error('Error in showClarificationMode:', error);
+        Helpers.showError('Error displaying clarification: ' + error.message);
+    }
+}
+
+/**
+ * Load suggested response for a clarification email
+ */
+async function loadSuggestedResponse(email) {
+    const loadingEl = document.getElementById('suggested-answer-loading');
+    const contentEl = document.getElementById('suggested-answer-content');
+    const textareaEl = document.getElementById('clarification-response-text');
+    
+    if (loadingEl) loadingEl.classList.remove('hidden');
+    if (contentEl) contentEl.classList.add('hidden');
+    
+    try {
+        // Extract question from body
+        const bodyText = email.body?.content ? Helpers.stripHtml(email.body.content) : '';
+        
+        let suggestedResponse = '';
+        
+        // Try API first
+        try {
+            const result = await ApiClient.suggestResponse(
+                email.id,
+                email.id,
+                bodyText.substring(0, 1000) // Limit question length
+            );
+            suggestedResponse = result.suggested_response || '';
+            console.log('Suggested response from API received');
+        } catch (apiError) {
+            console.warn('API suggestion failed:', apiError.message);
+            // Generate a basic template response
+            suggestedResponse = generateFallbackResponse(email, bodyText);
+        }
+        
+        if (loadingEl) loadingEl.classList.add('hidden');
+        if (contentEl) contentEl.classList.remove('hidden');
+        
+        if (textareaEl) {
+            textareaEl.value = suggestedResponse || 'Please compose your reply manually.';
+        }
+        
+    } catch (error) {
+        console.error('Error getting suggested response:', error);
+        if (loadingEl) loadingEl.classList.add('hidden');
+        if (contentEl) contentEl.classList.remove('hidden');
+        if (textareaEl) {
+            textareaEl.value = generateFallbackResponse(email, '');
+        }
+    }
+}
+
+/**
+ * Generate a fallback response template when API is unavailable
+ */
+function generateFallbackResponse(email, bodyText) {
+    const senderName = email.from?.emailAddress?.name || 'Supplier';
+    const subject = email.subject || 'your inquiry';
+    
+    return `Dear ${senderName},
+
+Thank you for your email regarding "${subject}".
+
+We have reviewed your questions and will respond with the requested information shortly.
+
+[Please add your specific response here]
+
+Best regards,
+Procurement Team`;
+}
+
+/**
+ * Show Quote mode when user clicks on a quote email
+ */
+async function showQuoteMode(context) {
+    console.log('=== Showing Quote mode ===');
+    
+    try {
+        showMode('quote-mode');
+        AppState.currentMode = 'quote';
+        
+        const email = context.email;
+        const originalRfq = context.originalRfq; // May be present if opened from sent RFQ
+        
+        if (!email) {
+            console.error('No email data in context');
+            const emailInfoBox = document.getElementById('quote-email-info');
+            if (emailInfoBox) {
+                emailInfoBox.innerHTML = '<p class="error-text">Could not load email details</p>';
+            }
+            return;
+        }
+        
+        // Display email info
+        const emailInfoBox = document.getElementById('quote-email-info');
+        if (emailInfoBox) {
+            const fromAddress = email.from?.emailAddress?.address || 'Unknown sender';
+            const fromName = email.from?.emailAddress?.name || fromAddress;
+            const dateStr = email.receivedDateTime ? 
+                new Date(email.receivedDateTime).toLocaleString() : 'Unknown date';
+            
+            let html = `
+                <div class="email-subject">${Helpers.escapeHtml(email.subject || 'No subject')}</div>
+                <div class="email-from">From: ${Helpers.escapeHtml(fromName)} &lt;${Helpers.escapeHtml(fromAddress)}&gt;</div>
+                <div class="email-date">Received: ${dateStr}</div>
+            `;
+            
+            // If we have the original RFQ context, show it
+            if (originalRfq) {
+                html += `
+                    <div class="original-rfq-info" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #ddd; font-size: 12px; color: #666;">
+                        <div><strong>In reply to your RFQ:</strong></div>
+                        <div>${Helpers.escapeHtml(originalRfq.subject || 'Unknown subject')}</div>
+                    </div>
+                `;
+            }
+            
+            emailInfoBox.innerHTML = html;
+        }
+        
+        // Parse and display quote data (don't await - let it load in background)
+        loadParsedQuoteData(email).catch(err => {
+            console.error('Error loading quote data:', err);
+        });
+        
+    } catch (error) {
+        console.error('Error in showQuoteMode:', error);
+        Helpers.showError('Error displaying quote: ' + error.message);
+    }
+}
+
+/**
+ * Load and parse quote data from email
+ */
+async function loadParsedQuoteData(email) {
+    const loadingEl = document.getElementById('quote-loading');
+    const dataEl = document.getElementById('parsed-quote-data');
+    
+    if (loadingEl) loadingEl.classList.remove('hidden');
+    if (dataEl) dataEl.classList.add('hidden');
+    
+    const supplierEmail = email.from?.emailAddress?.address || '';
+    const supplierName = email.from?.emailAddress?.name || supplierEmail;
+    const bodyContent = email.body?.content || '';
+    const bodyText = Helpers.stripHtml(bodyContent);
+    
+    // Helper to safely set element text
+    const setField = (id, value) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = value || '-';
+    };
+    
+    // Try to extract basic info from email body directly (fallback)
+    const extractFromBody = () => {
+        const details = {
+            supplier_name: supplierName,
+            unit_price: null,
+            total_price: null,
+            lead_time: null,
+            validity: null,
+            payment_terms: null,
+            notes: null
+        };
+        
+        // Try to extract price from body
+        const priceMatch = bodyText.match(/(?:unit\s*price|price)[:\s]*\$?([\d,]+\.?\d*)/i);
+        if (priceMatch) details.unit_price = priceMatch[1];
+        
+        const totalMatch = bodyText.match(/(?:total\s*price|total)[:\s]*\$?([\d,]+\.?\d*)/i);
+        if (totalMatch) details.total_price = totalMatch[1];
+        
+        const leadTimeMatch = bodyText.match(/(?:delivery|lead\s*time)[:\s]*([^\n\r]+)/i);
+        if (leadTimeMatch) details.lead_time = leadTimeMatch[1].trim();
+        
+        const validityMatch = bodyText.match(/(?:validity|valid\s*for|quote\s*valid)[:\s]*([^\n\r]+)/i);
+        if (validityMatch) details.validity = validityMatch[1].trim();
+        
+        const termsMatch = bodyText.match(/(?:payment\s*terms|terms)[:\s]*([^\n\r]+)/i);
+        if (termsMatch) details.payment_terms = termsMatch[1].trim();
+        
+        return details;
+    };
+    
+    try {
+        // Extract RFQ ID from subject
+        const rfqId = EmailOperations.extractRfqId ? 
+            EmailOperations.extractRfqId(email.subject) : 
+            (email.subject?.match(/MAT-\d+/)?.[0] || null);
+        
+        let details = {};
+        
+        // Try API first
+        try {
+            const result = await ApiClient.extractQuote(
+                email.id,
+                rfqId,
+                supplierEmail,
+                bodyContent
+            );
+            details = result.extracted_details || result || {};
+            console.log('Quote extracted via API:', details);
+        } catch (apiError) {
+            console.warn('API quote extraction failed, using fallback:', apiError.message);
+            details = extractFromBody();
+            console.log('Quote extracted from body:', details);
+        }
+        
+        if (loadingEl) loadingEl.classList.add('hidden');
+        if (dataEl) dataEl.classList.remove('hidden');
+        
+        // Populate quote fields
+        setField('quote-supplier', details.supplier_name || supplierName);
+        setField('quote-price', details.unit_price ? `$${details.unit_price}` : null);
+        setField('quote-total-price', details.total_price ? `$${details.total_price}` : null);
+        setField('quote-leadtime', details.lead_time || details.delivery_time);
+        setField('quote-validity', details.validity || details.quote_validity);
+        setField('quote-terms', details.payment_terms);
+        setField('quote-notes', details.notes || details.additional_notes);
+        
+    } catch (error) {
+        console.error('Error parsing quote:', error);
+        if (loadingEl) loadingEl.classList.add('hidden');
+        if (dataEl) dataEl.classList.remove('hidden');
+        
+        // Try fallback extraction
+        const fallbackDetails = extractFromBody();
+        setField('quote-supplier', fallbackDetails.supplier_name || supplierName);
+        setField('quote-price', fallbackDetails.unit_price ? `$${fallbackDetails.unit_price}` : null);
+        setField('quote-total-price', fallbackDetails.total_price ? `$${fallbackDetails.total_price}` : null);
+        setField('quote-leadtime', fallbackDetails.lead_time);
+        setField('quote-validity', fallbackDetails.validity);
+        setField('quote-terms', fallbackDetails.payment_terms);
+        setField('quote-notes', 'Note: Quote details extracted from email body (API unavailable)');
+    }
+}
+
+// ==================== MODE ACTION HANDLERS ====================
+
+/**
+ * Handle sending all RFQ drafts from Draft mode
+ * CRITICAL: Complete ALL work (sending, folder moves, auto-replies) for non-current drafts
+ * BEFORE touching the current draft which will close the add-in
+ */
+async function handleSendAllDraftsFromDraftMode() {
+    if (!AuthService.isSignedIn()) {
+        Helpers.showError('Please sign in to send emails');
+        return;
+    }
+    
+    const sendBtn = document.getElementById('send-all-drafts-btn');
+    const statusEl = document.getElementById('draft-send-status');
+    const progressText = document.getElementById('draft-progress-text');
+    const progressFill = document.getElementById('draft-progress-fill');
+    
+    try {
+        // Show progress UI
+        if (sendBtn) sendBtn.disabled = true;
+        if (statusEl) statusEl.classList.remove('hidden');
+        
+        // Get all RFQ drafts
+        if (progressText) progressText.textContent = 'Finding RFQ drafts...';
+        const draftsResponse = await AuthService.graphRequest(
+            `/me/mailFolders/Drafts/messages?$filter=startswith(subject,'RFQ for')&$select=id,subject,toRecipients,body&$top=50`
+        );
+        
+        const drafts = draftsResponse.value || [];
+        
+        if (drafts.length === 0) {
+            Helpers.showError('No RFQ drafts found');
+            if (sendBtn) sendBtn.disabled = false;
+            if (statusEl) statusEl.classList.add('hidden');
+            return;
+        }
+        
+        console.log(`Found ${drafts.length} RFQ drafts to send`);
+        
+        // Get current email ID (the draft we might be viewing)
+        const currentDraftId = Office.context.mailbox.item?.itemId;
+        console.log('Currently viewing draft ID:', currentDraftId);
+        
+        // Separate current draft from others - we'll send it LAST
+        const otherDrafts = drafts.filter(d => d.id !== currentDraftId);
+        const currentDraft = drafts.find(d => d.id === currentDraftId);
+        
+        // Persist initial state
+        persistState({
+            sendingInProgress: true,
+            totalDrafts: drafts.length,
+            sentCount: 0,
+            autoRepliesScheduled: 0
+        });
+        
+        let sentCount = 0;
+        let autoRepliesScheduled = 0;
+        const totalDrafts = drafts.length;
+        
+        // STEP 1: Send ALL OTHER drafts first (not the current one)
+        // For each, complete the ENTIRE workflow before moving to next
+        for (const draft of otherDrafts) {
+            try {
+                const recipient = draft.toRecipients?.[0]?.emailAddress?.address || 'unknown';
+                if (progressText) progressText.textContent = `Sending to ${recipient}... (${sentCount + 1}/${totalDrafts})`;
+                if (progressFill) progressFill.style.width = `${((sentCount + 0.3) / totalDrafts) * 100}%`;
+                
+                // Send the draft and get the sent email details
+                const sendResult = await sendDraftEmailWithFullWorkflow(draft);
+                sentCount++;
+                
+                // Update UI
+                const draftItem = document.querySelector(`[data-draft-id="${draft.id}"]`);
+                if (draftItem) {
+                    const statusBadge = draftItem.querySelector('.draft-item-status');
+                    if (statusBadge) {
+                        statusBadge.textContent = 'Sent';
+                        statusBadge.classList.add('sent');
+                    }
+                }
+                
+                if (progressFill) progressFill.style.width = `${((sentCount) / totalDrafts) * 100}%`;
+                
+                if (sendResult.autoReplyScheduled) {
+                    autoRepliesScheduled++;
+                }
+                
+                // Update persisted state after each successful send
+                persistState({ sentCount, autoRepliesScheduled });
+                
+                console.log(`✓ Sent ${sentCount}/${totalDrafts}: ${draft.subject}`);
+                
+            } catch (error) {
+                console.error(`✗ Failed to send draft to ${draft.toRecipients?.[0]?.emailAddress?.address}:`, error);
+            }
+        }
+        
+        // STEP 2: If we sent all non-current drafts and there's no current draft, we're done
+        if (!currentDraft) {
+            persistState({ 
+                sendingInProgress: false, 
+                lastSendResult: 'success',
+                sentCount,
+                autoRepliesScheduled
+            });
+            if (progressFill) progressFill.style.width = '100%';
+            if (progressText) progressText.textContent = `✓ Sent ${sentCount} RFQ(s)! Auto-replies: ${autoRepliesScheduled}`;
+            Helpers.showSuccess(`Sent ${sentCount} RFQ(s) successfully! ${autoRepliesScheduled} auto-replies scheduled.`);
+            return;
+        }
+        
+        // STEP 3: Send the CURRENT draft last
+        // After this, the add-in WILL close because we're viewing this draft
+        if (progressText) progressText.textContent = `Sending final draft... Panel will close shortly.`;
+        if (progressFill) progressFill.style.width = '95%';
+        
+        // Mark state as complete BEFORE sending current draft (because we won't get a chance after)
+        persistState({ 
+            sendingInProgress: false, 
+            lastSendResult: 'success',
+            sentCount: sentCount + 1, // Include the one we're about to send
+            autoRepliesScheduled: autoRepliesScheduled + 1, // Assume it will work
+            showSuccessOnReopen: true
+        });
+        
+        // Small delay so user sees the message
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Send the current draft - this will trigger add-in close
+        try {
+            await sendDraftEmailWithFullWorkflow(currentDraft);
+            console.log('✓ Sent current draft successfully');
+        } catch (error) {
+            console.error('Error sending current draft:', error);
+            // Try to update state even though add-in might close
+            persistState({ lastSendResult: 'partial' });
+        }
+        
+    } catch (error) {
+        console.error('Error in send all drafts:', error);
+        Helpers.showError('Error sending drafts: ' + error.message);
+        persistState({ sendingInProgress: false, lastSendResult: 'error', errorMessage: error.message });
+    } finally {
+        if (sendBtn) sendBtn.disabled = false;
+    }
+}
+
+/**
+ * Send a single draft email with COMPLETE workflow:
+ * Uses EmailOperations.sendEmail which has robust retry logic for:
+ * 1. Send the email
+ * 2. Find it in Sent Items (with multiple strategies)
+ * 3. Move to correct folder
+ * 4. Apply category
+ * 5. Schedule auto-reply
+ */
+async function sendDraftEmailWithFullWorkflow(draft) {
+    const subject = draft.subject || '';
+    const recipient = draft.toRecipients?.[0]?.emailAddress?.address || '';
+    const materialMatch = subject.match(/MAT-\d+/i);
+    const materialCode = materialMatch ? materialMatch[0] : null;
+    const body = draft.body?.content || '';
+    
+    console.log(`=== Sending draft: ${subject} to ${recipient} ===`);
+    console.log(`Material code: ${materialCode}`);
+    
+    // Delete the draft first (to avoid duplicates), then send via sendEmail
+    // Actually, we need to send the draft itself via Graph API, not create a new email
+    
+    // Step 1: Send the draft via Graph API
+    console.log(`Sending draft ${draft.id}...`);
+    await AuthService.graphRequest(`/me/messages/${draft.id}/send`, {
+        method: 'POST'
+    });
+    console.log(`✓ Draft sent successfully`);
+    
+    // Step 2: Wait and find the sent email using the proven getSentEmails method
+    let sentEmail = null;
+    let internetMessageId = null;
+    let movedEmailId = null;
+    
+    const maxRetries = 5;
+    const initialDelay = 2000;
+    
+    for (let attempt = 0; attempt < maxRetries && !sentEmail; attempt++) {
+        const delay = initialDelay + (attempt * 1000);
+        console.log(`Waiting ${delay}ms for email to appear in Sent Items (attempt ${attempt + 1}/${maxRetries})...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        
+        // Strategy 1: Find by subject using getSentEmails
+        const sentEmailsBySubject = await EmailOperations.getSentEmails({
+            subject: subject,
+            top: 10
+        });
+        
+        if (sentEmailsBySubject.length > 0) {
+            // Filter by recipient to ensure we get the right one
+            for (const email of sentEmailsBySubject) {
+                const toRecipients = email.toRecipients || [];
+                const matchesRecipient = toRecipients.some(r => 
+                    r.emailAddress?.address?.toLowerCase() === recipient.toLowerCase()
+                );
+                
+                if (matchesRecipient) {
+                    sentEmail = email;
+                    console.log(`✓ Found sent email on attempt ${attempt + 1} by subject + recipient match`);
+                    break;
+                }
+            }
+            
+            // If no recipient match, use the most recent one
+            if (!sentEmail && sentEmailsBySubject.length > 0) {
+                sentEmail = sentEmailsBySubject[0];
+                console.log(`✓ Found sent email on attempt ${attempt + 1} by subject match`);
+            }
+        }
+        
+        // Strategy 2: If not found, try getting most recent emails
+        if (!sentEmail) {
+            const recentEmails = await EmailOperations.getSentEmails({ top: 20 });
+            for (const email of recentEmails) {
+                const toRecipients = email.toRecipients || [];
+                const matchesRecipient = toRecipients.some(r => 
+                    r.emailAddress?.address?.toLowerCase() === recipient.toLowerCase()
+                );
+                const matchesSubject = email.subject === subject;
+                
+                if (matchesRecipient && matchesSubject) {
+                    sentEmail = email;
+                    console.log(`✓ Found sent email on attempt ${attempt + 1} by recent emails search`);
+                    break;
+                }
+            }
+        }
+    }
+    
+    if (!sentEmail) {
+        console.error(`✗ Could not find sent email after ${maxRetries} attempts`);
+        return { success: true, sentEmailId: null, internetMessageId: null, autoReplyScheduled: false };
+    }
+    
+    internetMessageId = sentEmail.internetMessageId;
+    console.log(`Sent email ID: ${sentEmail.id}, internetMessageId: ${internetMessageId}`);
+    
+    // Step 3: Move to correct folder if we have material code
+    if (materialCode) {
+        try {
+            // Ensure folder structure exists
+            console.log(`Initializing folder structure for ${materialCode}...`);
+            await FolderManagement.initializeMaterialFolders(materialCode);
+            console.log(`✓ Folder structure ready`);
+            
+            // Move to Sent RFQs folder
+            const folderPath = `${materialCode}/${Config.FOLDERS.SENT_RFQS}`;
+            console.log(`Moving email to ${folderPath}...`);
+            const moveResult = await FolderManagement.moveEmailToFolder(sentEmail.id, folderPath);
+            movedEmailId = moveResult?.id || sentEmail.id;
+            console.log(`✓ Moved email to ${folderPath}`);
+            
+            // Wait for move to complete
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            // Apply category to the moved email
+            console.log(`Applying SENT RFQ category...`);
+            await EmailOperations.applyCategoryToEmail(movedEmailId, 'SENT RFQ', 'Preset6');
+            console.log(`✓ Category applied`);
+        } catch (folderError) {
+            console.error('Error with folder/category operations:', folderError);
+            // Continue even if folder operations fail
+        }
+    }
+    
+    // Step 4: Schedule auto-reply for demo/testing
+    let autoReplyScheduled = false;
+    if (internetMessageId) {
+        try {
+            const userEmail = Office.context.mailbox.userProfile?.emailAddress;
+            if (userEmail) {
+                const quantityMatch = subject.match(/(\d+)\s*pcs/i);
+                const quantity = quantityMatch ? parseInt(quantityMatch[1]) : 100;
+                
+                console.log(`Scheduling auto-reply to ${userEmail}...`);
+                await ApiClient.scheduleAutoReply({
+                    toEmail: userEmail,
+                    subject: subject,
+                    internetMessageId: internetMessageId,
+                    material: materialCode || 'Unknown Material',
+                    replyType: 'random',
+                    delaySeconds: 30,
+                    quantity: quantity
+                });
+                
+                console.log(`✓ Auto-reply scheduled (will arrive in ~30 seconds)`);
+                autoReplyScheduled = true;
+            } else {
+                console.warn('Could not get user email for auto-reply scheduling');
+            }
+        } catch (autoReplyError) {
+            console.error('Error scheduling auto-reply:', autoReplyError);
+            // Continue even if auto-reply fails
+        }
+    } else {
+        console.warn('No internetMessageId available - cannot schedule auto-reply');
+    }
+    
+    console.log(`=== Completed workflow for: ${subject} ===\n`);
+    
+    return {
+        success: true,
+        sentEmailId: movedEmailId || sentEmail.id,
+        internetMessageId,
+        autoReplyScheduled
+    };
+}
+
+/**
+ * Send a single draft email (simple version for backwards compatibility)
+ */
+async function sendDraftEmail(draft) {
+    // Extract material code from subject
+    const materialMatch = draft.subject?.match(/MAT-\d+/i);
+    const materialCode = materialMatch ? materialMatch[0] : null;
+    
+    // Send the draft
+    await AuthService.graphRequest(`/me/messages/${draft.id}/send`, {
+        method: 'POST'
+    });
+    
+    console.log(`Sent draft: ${draft.subject}`);
+    
+    // If we have a material code, try to move to the correct folder
+    // Note: The email is already sent, so we'd need to find it in Sent Items
+    // This is handled by EmailOperations.sendEmail in the regular flow
+}
+
+/**
+ * Handle sending clarification to engineer
+ */
+async function handleSendToEngineer() {
+    if (!AppState.emailContext?.email) {
+        Helpers.showError('No email context');
+        return;
+    }
+    
+    try {
+        Helpers.showLoading('Forwarding to engineering...');
+        
+        const email = AppState.emailContext.email;
+        const engineeringEmail = Config.getSetting(Config.STORAGE_KEYS.ENGINEERING_EMAIL, 'engineering@company.com');
+        
+        // Create forward draft
+        const subject = `[Engineering Review] ${email.subject}`;
+        const body = `
+            <p>Please review the following technical clarification request:</p>
+            <hr>
+            <p><strong>Original Email:</strong></p>
+            <p><strong>From:</strong> ${email.from?.emailAddress?.address}</p>
+            <p><strong>Subject:</strong> ${email.subject}</p>
+            <hr>
+            ${email.body?.content || ''}
+        `;
+        
+        await EmailOperations.createDraft(engineeringEmail, subject, body);
+        
+        // Move original email to Awaiting Engineer folder
+        const materialMatch = email.subject?.match(/MAT-\d+/i);
+        if (materialMatch) {
+            const folderPath = `${materialMatch[0]}/${Config.FOLDERS.AWAITING_ENGINEER}`;
+            try {
+                await FolderManagement.moveEmailToFolder(email.id, folderPath);
+            } catch (e) {
+                console.error('Could not move email to folder:', e);
+            }
+        }
+        
+        Helpers.showSuccess('Forwarded to engineering team');
+        
+        // Go back to workflow
+        showRFQWorkflowMode();
+        
+    } catch (error) {
+        Helpers.showError('Failed to forward: ' + error.message);
+    } finally {
+        Helpers.hideLoading();
+    }
+}
+
+/**
+ * Handle replying to supplier with clarification response
+ */
+async function handleReplyToSupplier() {
+    if (!AppState.emailContext?.email) {
+        Helpers.showError('No email context');
+        return;
+    }
+    
+    const responseText = document.getElementById('clarification-response-text')?.value;
+    if (!responseText || responseText.trim().length === 0) {
+        Helpers.showError('Please enter a response');
+        return;
+    }
+    
+    try {
+        Helpers.showLoading('Creating reply...');
+        
+        const email = AppState.emailContext.email;
+        const supplierEmail = email.from?.emailAddress?.address;
+        
+        // Create reply
+        const subject = email.subject.startsWith('RE:') ? email.subject : `RE: ${email.subject}`;
+        const htmlBody = EmailOperations.formatTextAsHtml(responseText);
+        
+        await EmailOperations.createDraft(supplierEmail, subject, htmlBody);
+        
+        // Move original email to Awaiting Clarification Response folder
+        const materialMatch = email.subject?.match(/MAT-\d+/i);
+        if (materialMatch) {
+            const folderPath = `${materialMatch[0]}/${Config.FOLDERS.AWAITING_CLARIFICATION}`;
+            try {
+                await FolderManagement.moveEmailToFolder(email.id, folderPath);
+            } catch (e) {
+                console.error('Could not move email to folder:', e);
+            }
+        }
+        
+        Helpers.showSuccess('Reply draft created');
+        
+        // Go back to workflow
+        showRFQWorkflowMode();
+        
+    } catch (error) {
+        Helpers.showError('Failed to create reply: ' + error.message);
+    } finally {
+        Helpers.hideLoading();
+    }
+}
+
+/**
+ * Handle accepting a quote
+ */
+async function handleAcceptQuote() {
+    if (!AppState.emailContext?.email) {
+        Helpers.showError('No email context');
+        return;
+    }
+    
+    try {
+        Helpers.showLoading('Processing quote acceptance...');
+        
+        // For now, just show a success message
+        // In a real implementation, this would create a PO or update the system
+        Helpers.showSuccess('Quote acceptance noted. Please create a Purchase Order in your ERP system.');
+        
+    } catch (error) {
+        Helpers.showError('Failed to process: ' + error.message);
+    } finally {
+        Helpers.hideLoading();
+    }
+}
+
 // ==================== INITIALIZATION ====================
+// Global error handler to prevent crashes
+window.onerror = function(message, source, lineno, colno, error) {
+    console.error('Global error caught:', message, source, lineno, colno);
+    console.error('Error object:', error);
+    return false;
+};
+
+window.onunhandledrejection = function(event) {
+    console.error('Unhandled promise rejection:', event.reason);
+};
+
 Office.onReady((info) => {
+    console.log('Office.onReady fired, host:', info.host);
     if (info.host === Office.HostType.Outlook) {
         console.log('Office.js is ready in Outlook');
-        initializeApp();
+        initializeApp().catch(err => {
+            console.error('initializeApp error:', err);
+            // Try to show something
+            const mainContent = document.getElementById('main-content');
+            if (mainContent) mainContent.style.display = 'block';
+        });
     } else {
         console.log('Running outside of Outlook - limited functionality');
-        initializeApp();
+        initializeApp().catch(err => {
+            console.error('initializeApp error:', err);
+        });
     }
 });
 
-function initializeApp() {
+async function initializeApp() {
+    console.log('=== Initializing Procurement Workflow Add-in ===');
+    
+    try {
     // Load saved settings
     Config.loadSettings();
     
-    // Initialize authentication
-    initializeAuth();
-    
-    // Set up event listeners
+        // Set up event listeners FIRST (so UI is responsive)
     setupEventListeners();
+        setupModeEventListeners();
+        
+        // Initialize authentication - MUST await to ensure auth before context detection
+        await initializeAuth();
     
-    // Load initial data
+        // Register for ItemChanged event
+        registerItemChangedHandler();
+        
+        // Restore persisted state (shows success message if we were sending)
+        // Note: This only shows messages, we ALWAYS detect context afterwards
+        try {
+            restorePersistedState();
+        } catch (e) {
+            console.error('Error restoring state:', e);
+        }
+        
+        // ALWAYS detect email context and render appropriate UI
+        // Even if we showed a success message, we need to detect what email we're on
+        // CRITICAL: Wrap context detection in its own try-catch
+        // so the add-in always shows something
+        try {
+            console.log('Detecting email context...');
+            const context = await detectEmailContext();
+            console.log('Context detected:', context.type);
+            await renderContextUI(context);
+            console.log('Context UI rendered');
+        } catch (contextError) {
+            console.error('Error in context detection/rendering:', contextError);
+            console.error('Stack:', contextError.stack);
+            // ALWAYS show normal mode if there's any error
+            showRFQWorkflowMode();
+        }
+        
+        // Load initial data for workflow mode
+        if (AppState.currentMode === 'rfq-workflow' || AppState.currentMode === 'normal' || !AppState.currentMode) {
+            try {
     loadInitialData();
+            } catch (dataError) {
+                console.error('Error loading initial data:', dataError);
+            }
+        }
+        
+        console.log('=== Add-in initialization complete ===');
+        
+    } catch (fatalError) {
+        console.error('FATAL ERROR during initialization:', fatalError);
+        console.error('Stack:', fatalError.stack);
+        // Ensure add-in shows something
+        try {
+            showRFQWorkflowMode();
+        } catch (e) {
+            // Last resort - show main content directly
+            const mainContent = document.getElementById('main-content');
+            if (mainContent) mainContent.style.display = 'block';
+        }
+    }
+}
+
+/**
+ * Set up event listeners for mode-specific buttons
+ */
+function setupModeEventListeners() {
+    // Back buttons
+    document.getElementById('back-to-workflow-from-draft')?.addEventListener('click', () => {
+        showRFQWorkflowMode();
+        loadInitialData();
+    });
+    document.getElementById('back-to-workflow-from-clarification')?.addEventListener('click', () => {
+        showRFQWorkflowMode();
+        loadInitialData();
+    });
+    document.getElementById('back-to-workflow-from-quote')?.addEventListener('click', () => {
+        showRFQWorkflowMode();
+        loadInitialData();
+    });
     
-    // Update UI based on context
-    updateContextUI();
+    // Draft mode buttons
+    document.getElementById('send-all-drafts-btn')?.addEventListener('click', handleSendAllDraftsFromDraftMode);
     
-    console.log('Procurement Workflow Add-in initialized');
+    // Clarification mode buttons
+    document.getElementById('send-to-engineer-btn')?.addEventListener('click', handleSendToEngineer);
+    document.getElementById('reply-to-supplier-btn')?.addEventListener('click', handleReplyToSupplier);
+    
+    // Quote mode buttons
+    document.getElementById('compare-quotes-btn')?.addEventListener('click', () => {
+        // Switch to quote comparison tab
+        showRFQWorkflowMode();
+        const quoteTab = document.querySelector('[data-tab="quote-comparison"]');
+        if (quoteTab) quoteTab.click();
+    });
+    document.getElementById('accept-quote-btn')?.addEventListener('click', handleAcceptQuote);
+}
+
+/**
+ * Register handler for ItemChanged event
+ * This is REQUIRED for the pinnable taskpane feature to work properly
+ * When the user navigates to a different email while the taskpane is pinned,
+ * this handler will be called to update the UI
+ */
+function registerItemChangedHandler() {
+    try {
+        if (Office.context.mailbox) {
+            Office.context.mailbox.addHandlerAsync(
+                Office.EventType.ItemChanged,
+                onItemChanged,
+                function(asyncResult) {
+                    if (asyncResult.status === Office.AsyncResultStatus.Succeeded) {
+                        console.log('ItemChanged handler registered successfully - pinning is enabled');
+                    } else {
+                        console.error('Failed to register ItemChanged handler:', asyncResult.error);
+                    }
+                }
+            );
+        }
+    } catch (error) {
+        console.error('Error registering ItemChanged handler:', error);
+    }
+}
+
+/**
+ * Handle ItemChanged event when user navigates to a different email
+ * This is called when the taskpane is pinned and user selects a different email
+ */
+async function onItemChanged(eventArgs) {
+    console.log('Item changed - user navigated to different email');
+    
+    // Re-detect context and update UI
+    try {
+        const context = await detectEmailContext();
+        await renderContextUI(context);
+    } catch (error) {
+        console.error('Error handling item change:', error);
+        showRFQWorkflowMode();
+    }
+    
+    // If in workflow mode, also update email processing tab info
+    if (AppState.currentMode === 'rfq-workflow') {
+        const emailProcessingTab = document.getElementById('email-processing-tab');
+        if (emailProcessingTab && !emailProcessingTab.classList.contains('hidden')) {
+            updateCurrentEmailInfo();
+        }
+    }
 }
 
 // ==================== AUTHENTICATION ====================
@@ -176,6 +1795,36 @@ function setupEventListeners() {
     document.getElementById('dismiss-success')?.addEventListener('click', () => {
         Helpers.hideElement(document.getElementById('success-banner'));
     });
+    
+    // Pin reminder banner
+    document.getElementById('dismiss-pin-reminder')?.addEventListener('click', dismissPinReminder);
+    
+    // Check if pin reminder was previously dismissed
+    initPinReminder();
+}
+
+/**
+ * Initialize pin reminder banner - show it if user hasn't dismissed it
+ */
+function initPinReminder() {
+    const pinReminderDismissed = localStorage.getItem('procurement_pin_reminder_dismissed');
+    const pinReminderBanner = document.getElementById('pin-reminder-banner');
+    
+    if (pinReminderDismissed === 'true') {
+        pinReminderBanner?.classList.add('hidden');
+    } else {
+        pinReminderBanner?.classList.remove('hidden');
+    }
+}
+
+/**
+ * Dismiss the pin reminder and remember the choice
+ */
+function dismissPinReminder() {
+    const pinReminderBanner = document.getElementById('pin-reminder-banner');
+    pinReminderBanner?.classList.add('hidden');
+    localStorage.setItem('procurement_pin_reminder_dismissed', 'true');
+    console.log('Pin reminder dismissed and saved');
 }
 
 // ==================== TAB NAVIGATION ====================
@@ -211,11 +1860,37 @@ function handleTabClick(event) {
 
 // ==================== DATA LOADING ====================
 async function loadInitialData() {
+    // Check if we have persisted state with PRs
+    const state = getPersistedState();
+    
+    if (state.prs && state.prs.length > 0) {
+        // Restore PRs from state
+        AppState.prs = state.prs;
+        renderPRList(AppState.prs);
+        
+        // Also restore selected PR if any
+        if (state.selectedPR) {
+            AppState.selectedPR = state.selectedPR;
+            // Re-select it in the UI
+            setTimeout(() => {
+                const prItem = document.querySelector(`[data-pr-id="${state.selectedPR.pr_id}"]`);
+                if (prItem) prItem.classList.add('selected');
+            }, 100);
+        }
+        return;
+    }
+    
+    // Otherwise auto-load PRs
     try {
         Helpers.showLoading('Loading open PRs...');
         await loadOpenPRs();
     } catch (error) {
-        Helpers.showError('Failed to load initial data: ' + error.message);
+        console.log('Could not auto-load PRs:', error.message);
+        // Show placeholder instead of error - user can click refresh to load
+        const prList = document.getElementById('pr-list');
+        if (prList) {
+            prList.innerHTML = '<p class="placeholder-text">Click the <strong>Refresh</strong> button ↻ to load open Purchase Requisitions</p>';
+        }
     } finally {
         Helpers.hideLoading();
     }
@@ -307,6 +1982,13 @@ async function handlePRSelect(pr) {
     });
     
     AppState.selectedPR = pr;
+    
+    // Persist the selection
+    persistState({ 
+        selectedPR: pr,
+        prs: AppState.prs,
+        currentStep: 'suppliers'
+    });
     
     // Show PR details
     const detailsContainer = document.getElementById('pr-details');
@@ -594,7 +2276,7 @@ async function handleCreateDraft() {
         if (result.status === 'draft_saved_and_opened') {
             Helpers.showSuccess('Draft saved to Drafts folder and opened for editing');
         } else {
-            Helpers.showSuccess('Draft created successfully');
+        Helpers.showSuccess('Draft created successfully');
         }
         closeRFQPreviewModal();
     } catch (error) {
@@ -701,7 +2383,7 @@ async function createSingleDraft(index) {
         if (result.status === 'draft_saved_and_opened') {
             Helpers.showSuccess('Draft saved to Drafts folder and opened for ' + rfq.supplier_name);
         } else {
-            Helpers.showSuccess('Draft created for ' + rfq.supplier_name);
+        Helpers.showSuccess('Draft created for ' + rfq.supplier_name);
         }
     } catch (error) {
         Helpers.showError('Failed to create draft: ' + error.message);
@@ -801,7 +2483,7 @@ async function handleSendAllRFQs() {
 
                 // Send email with materialCode for folder organization
                 console.log(`Sending RFQ to ${rfq.supplier_name} (${rfq.supplier_email})`);
-                await EmailOperations.sendEmail({
+                const sendResult = await EmailOperations.sendEmail({
                     to: [rfq.supplier_email],
                     subject: rfq.subject || '',
                     body: htmlBody,
@@ -820,6 +2502,38 @@ async function handleSendAllRFQs() {
                         console.error(`Failed to delete draft for ${rfq.supplier_name}:`, error);
                         // Continue even if draft deletion fails
                     }
+                }
+
+                // Schedule auto-reply for demo/testing purposes
+                if (sendResult.internetMessageId) {
+                    try {
+                        const userEmail = Office.context.mailbox.userProfile?.emailAddress;
+                        const materialName = AppState.selectedPR?.material || 
+                                           AppState.selectedPR?.description || 
+                                           materialCode;
+                        const quantity = AppState.selectedPR?.quantity || 100;
+
+                        if (userEmail) {
+                            console.log(`Scheduling auto-reply for RFQ to ${rfq.supplier_name}...`);
+                            const replyResult = await ApiClient.scheduleAutoReply({
+                                toEmail: userEmail,
+                                subject: rfq.subject || '',
+                                internetMessageId: sendResult.internetMessageId,
+                                material: materialName,
+                                replyType: 'random',
+                                delaySeconds: 30,
+                                quantity: quantity
+                            });
+                            console.log(`✓ Auto-reply scheduled for ${rfq.supplier_name}:`, replyResult);
+                        } else {
+                            console.warn('Could not get user email for auto-reply scheduling');
+                        }
+                    } catch (replyError) {
+                        // Non-critical: don't fail the send if auto-reply scheduling fails
+                        console.error(`Failed to schedule auto-reply for ${rfq.supplier_name}:`, replyError);
+                    }
+                } else {
+                    console.warn(`No internetMessageId available for ${rfq.supplier_name} - auto-reply not scheduled`);
                 }
 
                 console.log(`Successfully sent RFQ to ${rfq.supplier_name}`);
@@ -843,7 +2557,7 @@ async function handleSendAllRFQs() {
         renderRFQCards(AppState.rfqs);
 
         if (failCount === 0) {
-            Helpers.showSuccess(`All ${successCount} RFQ(s) sent successfully`);
+            Helpers.showSuccess(`All ${successCount} RFQ(s) sent successfully. Replies will arrive in ~30 seconds.`);
         } else {
             Helpers.showError(`${successCount} sent, ${failCount} failed`);
         }
@@ -1223,7 +2937,26 @@ function openSettingsModal() {
     document.getElementById('auto-create-folders').checked = 
         Config.getSetting(Config.STORAGE_KEYS.AUTO_CREATE_FOLDERS, true);
     
+    // Load pin taskpane setting
+    const isPinned = Config.getSetting('PIN_TASKPANE', false);
+    document.getElementById('pin-taskpane').checked = isPinned;
+    updatePinStatusMessage(isPinned);
+    
+    // Add change listener for pin checkbox
+    document.getElementById('pin-taskpane').onchange = function() {
+        updatePinStatusMessage(this.checked);
+    };
+    
     Helpers.showElement(document.getElementById('settings-modal'));
+}
+
+function updatePinStatusMessage(isPinned) {
+    const statusEl = document.getElementById('pin-status');
+    if (isPinned) {
+        statusEl.innerHTML = '<span class="pin-enabled-message">✓ Add-in will stay open when you navigate between emails.</span>';
+    } else {
+        statusEl.textContent = 'Enable this to keep the add-in panel visible as you navigate between emails.';
+    }
 }
 
 function closeSettingsModal() {
@@ -1231,6 +2964,8 @@ function closeSettingsModal() {
 }
 
 function saveSettings() {
+    const isPinned = document.getElementById('pin-taskpane').checked;
+    
     const settings = {
         apiUrl: document.getElementById('api-url').value,
         engineeringEmail: document.getElementById('engineering-email').value,
@@ -1239,8 +2974,34 @@ function saveSettings() {
     };
     
     Config.saveSettings(settings);
+    
+    // Save pin setting separately
+    Config.setSetting('PIN_TASKPANE', isPinned);
+    
+    // Apply pin behavior
+    if (isPinned) {
+        enablePinnedBehavior();
+    }
+    
     closeSettingsModal();
-    Helpers.showSuccess('Settings saved');
+    Helpers.showSuccess('Settings saved' + (isPinned ? ' - Add-in is now pinned!' : ''));
+}
+
+/**
+ * Enable pinned behavior - ensures the taskpane stays responsive
+ * when navigating between emails
+ */
+function enablePinnedBehavior() {
+    // The ItemChanged handler is already registered in initializeApp
+    // This function ensures the add-in maintains its state
+    console.log('Pinned behavior enabled - taskpane will stay open when changing emails');
+    
+    // Store the current state so it persists
+    try {
+        localStorage.setItem('procurement_addin_pinned', 'true');
+    } catch (e) {
+        console.log('Could not save pin state to localStorage');
+    }
 }
 
 // Make functions available globally for inline event handlers

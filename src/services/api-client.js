@@ -195,6 +195,32 @@ const ApiClient = {
     async getQuotes(rfqId) {
         const response = await this.get(`/quotes/${rfqId}`);
         return response.quotes || [];
+    },
+
+    // ==================== DEMO ENDPOINTS ====================
+
+    /**
+     * Schedule an automatic reply for demo/testing purposes
+     * The backend will send a simulated supplier reply after the specified delay
+     * @param {Object} options - Reply options
+     * @param {string} options.toEmail - User's email address (where to send the reply)
+     * @param {string} options.subject - Original RFQ subject
+     * @param {string} options.internetMessageId - Internet Message ID of the sent RFQ (for threading)
+     * @param {string} options.material - Material name for generating realistic reply content
+     * @param {string} options.replyType - Type of reply: "quote", "clarification_procurement", "clarification_engineering", or "random"
+     * @param {number} options.delaySeconds - How long to wait before sending (default: 30)
+     * @param {number} options.quantity - Quantity for quote calculations (default: 100)
+     */
+    async scheduleAutoReply(options) {
+        return this.post('/demo/schedule-reply', {
+            to_email: options.toEmail,
+            original_subject: options.subject,
+            original_message_id: options.internetMessageId,
+            material: options.material,
+            reply_type: options.replyType || 'random',
+            delay_seconds: options.delaySeconds || 30,
+            quantity: options.quantity || 100
+        });
     }
 };
 

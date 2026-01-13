@@ -74,6 +74,172 @@
             </button>
         </div>
 
+        <!-- Info Banner -->
+        <div id="pin-reminder-banner" class="pin-reminder-banner">
+            <div class="pin-reminder-content">
+                <span>💡 <strong>Quick access:</strong> Click the <strong>Apps</strong> button (grid icon) → <strong>Procurement Workflow</strong> to reopen this panel anytime.</span>
+            </div>
+            <button id="dismiss-pin-reminder" class="ms-Button ms-Button--icon dismiss-pin-btn" title="Dismiss">
+                <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--Cancel"></i></span>
+            </button>
+        </div>
+
+        <!-- ==================== CONTEXT-BASED MODE CONTAINERS ==================== -->
+        
+        <!-- Draft Mode - Shown when user is viewing/editing a draft RFQ email -->
+        <div id="draft-mode" class="mode-container hidden">
+            <div class="mode-header">
+                <div class="mode-icon">📝</div>
+                <h2>RFQ Draft Editor</h2>
+            </div>
+            <div class="mode-body">
+                <p class="mode-description">You're viewing an RFQ draft. You can edit it directly in Outlook, then use the button below to send all RFQ drafts.</p>
+                
+                <div id="draft-list-section" class="draft-list-section">
+                    <h3>RFQ Drafts Ready to Send</h3>
+                    <div id="pending-drafts-list" class="pending-drafts-list">
+                        <p class="loading-text">Loading drafts...</p>
+                    </div>
+                </div>
+                
+                <div class="draft-actions">
+                    <button id="send-all-drafts-btn" class="ms-Button ms-Button--primary ms-Button--large">
+                        <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--Send"></i></span>
+                        <span class="ms-Button-label">Send All RFQ Drafts</span>
+                    </button>
+                    <p class="warning-text">⚠️ Sending will close this panel when the current draft is sent. Reopen the add-in to see results.</p>
+                </div>
+                
+                <div id="draft-send-status" class="draft-send-status hidden">
+                    <div class="status-progress">
+                        <span id="draft-progress-text">Sending...</span>
+                        <div class="progress-bar">
+                            <div id="draft-progress-fill" class="progress-fill"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="mode-footer">
+                <button id="back-to-workflow-from-draft" class="ms-Button">
+                    <span class="ms-Button-label">← Back to Workflow</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Clarification Mode - Shown when user clicks on a clarification email -->
+        <div id="clarification-mode" class="mode-container hidden">
+            <div class="mode-header clarification-header">
+                <div class="mode-icon">❓</div>
+                <h2>Clarification Request</h2>
+            </div>
+            <div class="mode-body">
+                <div id="clarification-email-info" class="email-info-box">
+                    <p class="loading-text">Loading email details...</p>
+                </div>
+                
+                <div id="clarification-question-section" class="question-section">
+                    <h3>Supplier's Question</h3>
+                    <div id="clarification-question-text" class="question-box">
+                        <!-- Question will be extracted and shown here -->
+                    </div>
+                </div>
+                
+                <div id="suggested-answers-section" class="suggested-answers-section">
+                    <h3>Suggested Response</h3>
+                    <div id="suggested-answer-loading" class="loading-indicator">
+                        <div class="spinner-small"></div>
+                        <span>Getting AI-suggested response...</span>
+                    </div>
+                    <div id="suggested-answer-content" class="hidden">
+                        <textarea id="clarification-response-text" class="ms-TextField-field response-textarea" rows="8" placeholder="Suggested response will appear here..."></textarea>
+                    </div>
+                </div>
+                
+                <div class="clarification-actions">
+                    <button id="send-to-engineer-btn" class="ms-Button">
+                        <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--EngineeringGroup"></i></span>
+                        <span class="ms-Button-label">Send to Engineer</span>
+                    </button>
+                    <button id="reply-to-supplier-btn" class="ms-Button ms-Button--primary">
+                        <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--Reply"></i></span>
+                        <span class="ms-Button-label">Reply to Supplier</span>
+                    </button>
+                </div>
+            </div>
+            <div class="mode-footer">
+                <button id="back-to-workflow-from-clarification" class="ms-Button">
+                    <span class="ms-Button-label">← Back to Workflow</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Quote Mode - Shown when user clicks on a quote email -->
+        <div id="quote-mode" class="mode-container hidden">
+            <div class="mode-header quote-header">
+                <div class="mode-icon">💰</div>
+                <h2>Quote Details</h2>
+            </div>
+            <div class="mode-body">
+                <div id="quote-email-info" class="email-info-box">
+                    <p class="loading-text">Loading email details...</p>
+                </div>
+                
+                <div id="parsed-quote-section" class="parsed-quote-section">
+                    <h3>Extracted Quote Information</h3>
+                    <div id="quote-loading" class="loading-indicator">
+                        <div class="spinner-small"></div>
+                        <span>Parsing quote data...</span>
+                    </div>
+                    <div id="parsed-quote-data" class="quote-data-grid hidden">
+                        <div class="quote-field">
+                            <label>Supplier:</label>
+                            <span id="quote-supplier">-</span>
+                        </div>
+                        <div class="quote-field">
+                            <label>Unit Price:</label>
+                            <span id="quote-price" class="price-value">-</span>
+                        </div>
+                        <div class="quote-field">
+                            <label>Total Price:</label>
+                            <span id="quote-total-price" class="price-value">-</span>
+                        </div>
+                        <div class="quote-field">
+                            <label>Lead Time:</label>
+                            <span id="quote-leadtime">-</span>
+                        </div>
+                        <div class="quote-field">
+                            <label>Validity:</label>
+                            <span id="quote-validity">-</span>
+                        </div>
+                        <div class="quote-field">
+                            <label>Payment Terms:</label>
+                            <span id="quote-terms">-</span>
+                        </div>
+                        <div class="quote-field full-width">
+                            <label>Notes:</label>
+                            <span id="quote-notes">-</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="quote-actions">
+                    <button id="compare-quotes-btn" class="ms-Button ms-Button--primary">
+                        <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--Compare"></i></span>
+                        <span class="ms-Button-label">Compare All Quotes</span>
+                    </button>
+                    <button id="accept-quote-btn" class="ms-Button">
+                        <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--Accept"></i></span>
+                        <span class="ms-Button-label">Accept Quote</span>
+                    </button>
+                </div>
+            </div>
+            <div class="mode-footer">
+                <button id="back-to-workflow-from-quote" class="ms-Button">
+                    <span class="ms-Button-label">← Back to Workflow</span>
+                </button>
+            </div>
+        </div>
+
         <!-- Main Content Area -->
         <main id="main-content">
 
@@ -269,6 +435,19 @@
                     </button>
                 </div>
                 <div class="modal-body">
+                    <!-- Pin Taskpane Setting -->
+                    <div class="setting-group pin-setting">
+                        <label class="setting-label-header">
+                            <input type="checkbox" id="pin-taskpane" />
+                            <strong>Keep add-in open when changing emails</strong>
+                        </label>
+                        <p class="setting-description" id="pin-status">
+                            Enable this to keep the add-in panel visible as you navigate between emails.
+                        </p>
+                    </div>
+                    
+                    <hr class="setting-divider"/>
+                    
                     <div class="setting-group">
                         <label for="api-url">Backend API URL:</label>
                         <input type="text" id="api-url" class="ms-TextField-field" value="http://localhost:8000"/>

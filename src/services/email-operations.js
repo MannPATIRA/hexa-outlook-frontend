@@ -275,6 +275,7 @@ const EmailOperations = {
         }
 
         let sentEmailId = null;
+        let internetMessageId = null;
 
         // If materialCode provided, move email to Sent RFQs folder
         if (options.materialCode) {
@@ -361,11 +362,13 @@ const EmailOperations = {
 
                 if (sentEmail) {
                     sentEmailId = sentEmail.id;
+                    internetMessageId = sentEmail.internetMessageId || null;
                     console.log(`Found sent email with ID: ${sentEmailId}`);
                     console.log(`Email details:`, {
                         id: sentEmail.id,
                         subject: sentEmail.subject,
-                        toRecipients: sentEmail.toRecipients || []
+                        toRecipients: sentEmail.toRecipients || [],
+                        internetMessageId: internetMessageId
                     });
 
                     // Ensure folder structure exists
@@ -454,7 +457,8 @@ const EmailOperations = {
 
         return { 
             status: 'sent',
-            sentEmailId: sentEmailId
+            sentEmailId: sentEmailId,
+            internetMessageId: internetMessageId
         };
     },
 
@@ -585,17 +589,19 @@ const EmailOperations = {
      * Apply a category to an email
      * @param {string} emailId - The ID of the email
      * @param {string} categoryName - Name of the category to apply
+     * @param {string} color - Optional color preset (default: Preset6/Blue)
+     *   Preset0 = Red, Preset1 = Orange, Preset2 = Brown, Preset3 = Yellow,
+     *   Preset4 = Green, Preset5 = Teal, Preset6 = Blue, Preset7 = Purple,
+     *   Preset8 = Pink, Preset9 = Gray
      */
-    async applyCategoryToEmail(emailId, categoryName) {
+    async applyCategoryToEmail(emailId, categoryName, color = 'Preset6') {
         if (!AuthService.isSignedIn()) {
             throw new Error('Please sign in to apply categories');
         }
 
         try {
-            // First, ensure the category exists
-            // Preset0 = Red, Preset1 = Orange, Preset2 = Brown, Preset3 = Yellow, Preset4 = Green, Preset5 = Teal, Preset6 = Blue, Preset7 = Purple, Preset8 = Pink, Preset9 = Gray
-            // Using Preset6 (Blue) for SENT RFQ category - light blue color
-            const categoryDisplayName = await this.getOrCreateCategory(categoryName, 'Preset6'); // Light blue color
+            // First, ensure the category exists with the specified color
+            const categoryDisplayName = await this.getOrCreateCategory(categoryName, color);
             console.log(`Category display name: "${categoryDisplayName}"`);
             
             // Get current email to see existing categories
@@ -933,6 +939,42 @@ const EmailOperations = {
      * Extract body content from various formats (string, object, etc.)
      * Handles cases where backend returns body as an object
      */
+    /**
+     * Format a value for display in email body
+     * Handles nested objects and arrays properly
+     */
+    formatValueForDisplay(value, indent = '') {
+        if (value === null || value === undefined) {
+            return '';
+        }
+        
+        if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+            return String(value);
+        }
+        
+        if (Array.isArray(value)) {
+            return value.map(item => this.formatValueForDisplay(item)).join(', ');
+        }
+        
+        if (typeof value === 'object') {
+            // Format nested object as indented key-value pairs
+            const lines = [];
+            for (const [k, v] of Object.entries(value)) {
+                const formattedKey = k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+                const formattedValue = this.formatValueForDisplay(v, indent + '  ');
+                if (typeof v === 'object' && v !== null && !Array.isArray(v)) {
+                    lines.push(`${indent}  ${formattedKey}:`);
+                    lines.push(`${formattedValue}`);
+                } else {
+                    lines.push(`${indent}  ${formattedKey}: ${formattedValue}`);
+                }
+            }
+            return lines.join('\n');
+        }
+        
+        return String(value);
+    },
+
     extractBodyContent(body) {
         if (!body) return '';
         
@@ -972,7 +1014,14 @@ const EmailOperations = {
                     if (typeof body.material_details === 'object') {
                         text += 'Material Details:\n';
                         for (const [key, value] of Object.entries(body.material_details)) {
-                            text += `  - ${key}: ${value}\n`;
+                            const formattedKey = key.replace(/_/g, ' ');
+                            const formattedValue = this.formatValueForDisplay(value);
+                            if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+                                // Nested object - format on multiple lines
+                                text += `- ${formattedKey}:\n${formattedValue}\n`;
+                            } else {
+                                text += `- ${formattedKey}: ${formattedValue}\n`;
+                            }
                         }
                     } else {
                         text += 'Material Details: ' + String(body.material_details) + '\n';
@@ -986,7 +1035,7 @@ const EmailOperations = {
             
             // Last resort: try JSON.stringify for objects with meaningful content
             try {
-                const jsonStr = JSON.stringify(body);
+                const jsonStr = JSON.stringify(body, null, 2);
                 // If JSON is reasonable length and not just empty object/array
                 if (jsonStr.length > 2 && jsonStr !== '{}' && jsonStr !== '[]') {
                     // Try to extract text from JSON
