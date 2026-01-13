@@ -22,7 +22,9 @@
         
         <!-- Header -->
         <header class="header">
-            <h1 class="ms-font-xl">Procurement Workflow</h1>
+            <div class="header-brand">
+                <img src="../assets/logo.png" class="app-logo" alt="Logo">
+            </div>
             <div class="header-actions">
                 <!-- Auth Status -->
                 <div id="auth-status" class="auth-status">
@@ -44,13 +46,6 @@
                 </button>
             </div>
         </header>
-
-        <!-- Navigation Tabs -->
-        <nav class="nav-tabs">
-            <button class="nav-tab active" data-tab="rfq-workflow">RFQ Workflow</button>
-            <button class="nav-tab" data-tab="email-processing">Email Processing</button>
-            <button class="nav-tab" data-tab="quote-comparison">Quote Comparison</button>
-        </nav>
 
         <!-- Loading Overlay -->
         <div id="loading-overlay" class="loading-overlay hidden">
@@ -77,7 +72,7 @@
         <!-- Info Banner -->
         <div id="pin-reminder-banner" class="pin-reminder-banner">
             <div class="pin-reminder-content">
-                <span>💡 <strong>Quick access:</strong> Click the <strong>Apps</strong> button (grid icon) → <strong>Procurement Workflow</strong> to reopen this panel anytime.</span>
+                <span><strong>Tip:</strong> Click <strong>Apps</strong> → <strong>Procurement Workflow</strong> to reopen anytime.</span>
             </div>
             <button id="dismiss-pin-reminder" class="ms-Button ms-Button--icon dismiss-pin-btn" title="Dismiss">
                 <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--Cancel"></i></span>
@@ -89,12 +84,12 @@
         <!-- Draft Mode - Shown when user is viewing/editing a draft RFQ email -->
         <div id="draft-mode" class="mode-container hidden">
             <div class="mode-header">
-                <div class="mode-icon">📝</div>
                 <h2>RFQ Draft Editor</h2>
             </div>
             <div class="mode-body">
-                <p class="mode-description">You're viewing an RFQ draft. You can edit it directly in Outlook, then use the button below to send all RFQ drafts.</p>
+                <p class="mode-description">Edit the draft in Outlook, then send all RFQ drafts below.</p>
                 
+                <!-- Pending Drafts Section (shown when there are drafts to send) -->
                 <div id="draft-list-section" class="draft-list-section">
                     <h3>RFQ Drafts Ready to Send</h3>
                     <div id="pending-drafts-list" class="pending-drafts-list">
@@ -102,7 +97,7 @@
                     </div>
                 </div>
                 
-                <div class="draft-actions">
+                <div id="draft-actions-section" class="draft-actions">
                     <button id="send-all-drafts-btn" class="ms-Button ms-Button--primary ms-Button--large">
                         <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--Send"></i></span>
                         <span class="ms-Button-label">Send All RFQ Drafts</span>
@@ -110,6 +105,7 @@
                     <p class="warning-text">⚠️ Sending will close this panel when the current draft is sent. Reopen the add-in to see results.</p>
                 </div>
                 
+                <!-- Send Progress Section (shown during/after sending) -->
                 <div id="draft-send-status" class="draft-send-status hidden">
                     <div class="status-progress">
                         <span id="draft-progress-text">Sending...</span>
@@ -117,6 +113,65 @@
                             <div id="draft-progress-fill" class="progress-fill"></div>
                         </div>
                     </div>
+                </div>
+                
+                <!-- RFQ Progress Tracker (shown after RFQs are sent) -->
+                <div id="rfq-progress-tracker" class="rfq-progress-tracker hidden">
+                    <h3>📊 RFQ Progress</h3>
+                    
+                    <!-- Sent RFQs -->
+                    <div class="progress-item">
+                        <div class="progress-item-header">
+                            <span class="progress-icon">✉️</span>
+                            <span class="progress-label">RFQs Sent</span>
+                            <span id="sent-rfq-count" class="progress-count">0</span>
+                        </div>
+                        <div class="progress-bar small">
+                            <div id="sent-rfq-progress" class="progress-fill" style="width: 100%; background: #107c10;"></div>
+                        </div>
+                    </div>
+                    
+                    <!-- Auto-Replies Scheduled -->
+                    <div class="progress-item">
+                        <div class="progress-item-header">
+                            <span class="progress-icon">⏰</span>
+                            <span class="progress-label">Auto-Replies Scheduled</span>
+                            <span id="auto-replies-scheduled-count" class="progress-count">0</span>
+                        </div>
+                        <div class="progress-bar small">
+                            <div id="auto-replies-scheduled-progress" class="progress-fill" style="width: 0%; background: #0078d4;"></div>
+                        </div>
+                    </div>
+                    
+                    <!-- Replies Received -->
+                    <div class="progress-item">
+                        <div class="progress-item-header">
+                            <span class="progress-icon">📬</span>
+                            <span class="progress-label">Replies Received</span>
+                            <span id="replies-received-count" class="progress-count">0 / 0</span>
+                        </div>
+                        <div class="progress-bar small">
+                            <div id="replies-received-progress" class="progress-fill" style="width: 0%; background: #ca5010;"></div>
+                        </div>
+                    </div>
+                    
+                    <!-- Replies Sorted -->
+                    <div class="progress-item">
+                        <div class="progress-item-header">
+                            <span class="progress-icon">📁</span>
+                            <span class="progress-label">Replies Sorted to Folders</span>
+                            <span id="replies-sorted-count" class="progress-count">0 / 0</span>
+                        </div>
+                        <div class="progress-bar small">
+                            <div id="replies-sorted-progress" class="progress-fill" style="width: 0%; background: #8764b8;"></div>
+                        </div>
+                    </div>
+                    
+                    <!-- Refresh Button -->
+                    <button id="refresh-progress-btn" class="ms-Button ms-Button--default" style="margin-top: 12px;">
+                        <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--Refresh"></i></span>
+                        <span class="ms-Button-label">Refresh Progress</span>
+                    </button>
                 </div>
             </div>
             <div class="mode-footer">
@@ -129,7 +184,6 @@
         <!-- Clarification Mode - Shown when user clicks on a clarification email -->
         <div id="clarification-mode" class="mode-container hidden">
             <div class="mode-header clarification-header">
-                <div class="mode-icon">❓</div>
                 <h2>Clarification Request</h2>
             </div>
             <div class="mode-body">
@@ -138,31 +192,22 @@
                 </div>
                 
                 <div id="clarification-question-section" class="question-section">
-                    <h3>Supplier's Question</h3>
-                    <div id="clarification-question-text" class="question-box">
-                        <!-- Question will be extracted and shown here -->
+                    <div id="clarification-questions-list" class="questions-list">
+                        <!-- Individual questions will be displayed here -->
                     </div>
-                </div>
-                
-                <div id="suggested-answers-section" class="suggested-answers-section">
-                    <h3>Suggested Response</h3>
-                    <div id="suggested-answer-loading" class="loading-indicator">
-                        <div class="spinner-small"></div>
-                        <span>Getting AI-suggested response...</span>
-                    </div>
-                    <div id="suggested-answer-content" class="hidden">
-                        <textarea id="clarification-response-text" class="ms-TextField-field response-textarea" rows="8" placeholder="Suggested response will appear here..."></textarea>
+                    <div id="clarification-question-text" class="question-box hidden">
+                        <!-- Fallback: single question text (hidden by default) -->
                     </div>
                 </div>
                 
                 <div class="clarification-actions">
-                    <button id="send-to-engineer-btn" class="ms-Button">
+                    <button id="send-to-engineer-btn" class="ms-Button" title="Forward to Engineering Team">
                         <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--EngineeringGroup"></i></span>
-                        <span class="ms-Button-label">Send to Engineer</span>
+                        <span class="ms-Button-label">Forward</span>
                     </button>
-                    <button id="reply-to-supplier-btn" class="ms-Button ms-Button--primary">
+                    <button id="reply-to-supplier-btn" class="ms-Button ms-Button--primary" title="Reply to Supplier">
                         <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--Reply"></i></span>
-                        <span class="ms-Button-label">Reply to Supplier</span>
+                        <span class="ms-Button-label">Reply</span>
                     </button>
                 </div>
             </div>
@@ -176,7 +221,6 @@
         <!-- Quote Mode - Shown when user clicks on a quote email -->
         <div id="quote-mode" class="mode-container hidden">
             <div class="mode-header quote-header">
-                <div class="mode-icon">💰</div>
                 <h2>Quote Details</h2>
             </div>
             <div class="mode-body">
@@ -185,7 +229,7 @@
                 </div>
                 
                 <div id="parsed-quote-section" class="parsed-quote-section">
-                    <h3>Extracted Quote Information</h3>
+                    <h3>Quote Information</h3>
                     <div id="quote-loading" class="loading-indicator">
                         <div class="spinner-small"></div>
                         <span>Parsing quote data...</span>
@@ -250,7 +294,7 @@
                 <div id="step-select-pr" class="workflow-step">
                     <h2 class="ms-font-l step-header">
                         <span class="step-number">1</span>
-                        Select Purchase Requisition
+                        Purchase Requisition
                     </h2>
                     <div class="step-content">
                         <div id="pr-list-container">
@@ -273,7 +317,7 @@
                 <div id="step-select-suppliers" class="workflow-step disabled">
                     <h2 class="ms-font-l step-header">
                         <span class="step-number">2</span>
-                        Select Suppliers
+                        Suppliers
                     </h2>
                     <div class="step-content">
                         <div id="supplier-list-container">
@@ -294,11 +338,11 @@
                     </div>
                 </div>
 
-                <!-- Step 3: Review & Send RFQs -->
-                <div id="step-review-rfqs" class="workflow-step disabled">
+                <!-- Step 3: Review & Send RFQs - Hidden, not shown after RFQ generation -->
+                <div id="step-review-rfqs" class="workflow-step disabled hidden">
                     <h2 class="ms-font-l step-header">
                         <span class="step-number">3</span>
-                        Review & Send RFQs
+                        Review & Send
                     </h2>
                     <div class="step-content">
                         <div id="rfq-list" class="rfq-cards-container">
@@ -319,7 +363,7 @@
                 
                 <!-- Current Email Info -->
                 <div id="current-email-section" class="email-section">
-                    <h2 class="ms-font-l">Current Email</h2>
+                    <h2 class="ms-font-l">Email</h2>
                     <div id="current-email-info" class="email-info-card">
                         <p class="placeholder-text">Select an email to process</p>
                     </div>
@@ -327,7 +371,7 @@
 
                 <!-- Classification Section -->
                 <div id="classification-section" class="email-section">
-                    <h2 class="ms-font-l">Classification</h2>
+                    <h2 class="ms-font-l">Classify</h2>
                     <div id="classification-result" class="classification-card hidden">
                         <div class="classification-badge" id="classification-badge"></div>
                         <p id="classification-confidence"></p>
@@ -403,22 +447,19 @@
             <section id="quote-comparison-tab" class="tab-content hidden">
                 
                 <div class="quote-comparison-header">
-                    <h2 class="ms-font-l">Quote Comparison</h2>
-                    <div class="rfq-selector">
-                        <label for="rfq-select">Select RFQ:</label>
-                        <select id="rfq-select" class="ms-Dropdown-select">
-                            <option value="">-- Select an RFQ --</option>
-                        </select>
-                    </div>
+                    <h2 class="ms-font-l">Compare Quotes</h2>
+                    <button id="refresh-quotes-btn" class="ms-Button ms-Button--icon" title="Refresh Quotes">
+                        <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--Refresh"></i></span>
+                    </button>
                 </div>
 
-                <div id="quotes-container" class="quotes-grid">
-                    <p class="placeholder-text">Select an RFQ to view and compare quotes</p>
+                <div id="quotes-container" class="quote-comparison-container">
+                    <p class="placeholder-text">Loading quotes from all Quotes folders...</p>
                 </div>
 
                 <div id="quote-summary" class="quote-summary hidden">
                     <h3>Summary</h3>
-                    <div id="summary-content"></div>
+                    <div id="summary-content" class="summary-grid"></div>
                 </div>
 
             </section>
@@ -524,6 +565,7 @@
     <script src="../services/email-operations.js"></script>
     <script src="../services/folder-management.js"></script>
     <script src="../services/email-monitor.js"></script>
+    <script src="../services/openai-service.js"></script>
     <script src="../utils/helpers.js"></script>
     <script src="taskpane.js"></script>
 </body>

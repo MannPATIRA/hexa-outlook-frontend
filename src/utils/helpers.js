@@ -345,5 +345,152 @@ const Helpers = {
     formatConfidence(confidence) {
         if (confidence === null || confidence === undefined) return 'N/A';
         return `${Math.round(confidence * 100)}% confidence`;
+    },
+
+    /**
+     * Parse clarification questions from email body
+     * Extracts individual questions from structured text (numbered sections, bullet points, etc.)
+     * @param {string} emailBody - The email body text (HTML or plain text)
+     * @returns {Array<Object>} Array of question objects with {category, question} structure
+     */
+    parseClarificationQuestions(emailBody) {
+        if (!emailBody) return [];
+        
+        // Convert HTML to plain text if needed
+        let text = this.stripHtml(emailBody);
+        
+        // Normalize line breaks
+        text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+        
+        const questions = [];
+        
+        // Pattern 1: Numbered sections with bullet points (e.g., "1. Tolerance Requirements\n- Question 1\n- Question 2")
+        const numberedSectionPattern = /(\d+)\.\s*([^\n]+(?:\n(?!\d+\.)[^\n]*)*)/g;
+        let match;
+        
+        while ((match = numberedSectionPattern.exec(text)) !== null) {
+            const sectionNumber = match[1];
+            const sectionContent = match[2].trim();
+            
+            // Extract category/title (first line)
+            const lines = sectionContent.split('\n').map(l => l.trim()).filter(l => l);
+            if (lines.length === 0) continue;
+            
+            const category = lines[0];
+            
+            // Extract individual questions (lines starting with -, •, *, or numbered sub-items)
+            const questionPattern = /^[-•*]\s*(.+)$|^(\d+[\.\)])\s*(.+)$/;
+            
+            for (let i = 1; i < lines.length; i++) {
+                const line = lines[i];
+                const questionMatch = line.match(questionPattern);
+                
+                if (questionMatch) {
+                    // Found a bullet point or sub-question
+                    const questionText = questionMatch[1] || questionMatch[3] || line;
+                    questions.push({
+                        category: category,
+                        question: questionText.trim(),
+                        sectionNumber: sectionNumber
+                    });
+                } else if (line.length > 10 && !line.match(/^[A-Z\s]+$/)) {
+                    // If line doesn't look like a header and is substantial, treat as a question
+                    questions.push({
+                        category: category,
+                        question: line.trim(),
+                        sectionNumber: sectionNumber
+                    });
+                }
+            }
+            
+            // If no sub-questions found but category exists, add category as a question
+            if (lines.length === 1 && category.length > 5) {
+                questions.push({
+                    category: category,
+                    question: category,
+                    sectionNumber: sectionNumber
+                });
+            }
+        }
+        
+        // Pattern 2: Simple bullet points without numbered sections
+        if (questions.length === 0) {
+            const bulletPattern = /^[-•*]\s*(.+)$/gm;
+            let bulletMatch;
+            
+            while ((bulletMatch = bulletPattern.exec(text)) !== null) {
+                const questionText = bulletMatch[1].trim();
+                if (questionText.length > 5) { // Filter out very short items
+                    questions.push({
+                        category: 'General Questions',
+                        question: questionText,
+                        sectionNumber: null
+                    });
+                }
+            }
+        }
+        
+        // Pattern 3: Questions separated by line breaks (fallback)
+        if (questions.length === 0) {
+            // Look for lines that end with "?" or are substantial questions
+            const questionLines = text.split('\n')
+                .map(l => l.trim())
+                .filter(l => l.length > 10 && (l.includes('?') || l.match(/^(what|how|why|when|where|can|could|would|is|are|do|does)/i)));
+            
+            questionLines.forEach((line, index) => {
+                questions.push({
+                    category: 'Questions',
+                    question: line,
+                    sectionNumber: (index + 1).toString()
+                });
+            });
+        }
+        
+        // Pattern 4: If still no questions found, split by common separators
+        if (questions.length === 0) {
+            // Try splitting by double newlines or common question markers
+            const sections = text.split(/\n\n+/).filter(s => s.trim().length > 10);
+            
+            sections.forEach((section, index) => {
+                const cleanSection = section.trim().replace(/\n/g, ' ').substring(0, 200);
+                if (cleanSection.length > 10) {
+                    questions.push({
+                        category: 'Question',
+                        question: cleanSection,
+                        sectionNumber: (index + 1).toString()
+                    });
+                }
+            });
+        }
+        
+        // Remove duplicates and clean up
+        const uniqueQuestions = [];
+        const seen = new Set();
+        
+        questions.forEach(q => {
+            const key = q.question.toLowerCase().trim();
+            if (!seen.has(key) && q.question.length > 5) {
+                seen.add(key);
+                uniqueQuestions.push(q);
+            }
+        });
+        
+        return uniqueQuestions;
+    },
+
+    /**
+     * Wrap a promise with a timeout
+     * @param {Promise} promise - The promise to wrap
+     * @param {number} ms - Timeout in milliseconds
+     * @param {string} errorMessage - Error message if timeout occurs
+     * @returns {Promise} Promise that rejects if timeout is exceeded
+     */
+    withTimeout(promise, ms, errorMessage = 'Operation timed out') {
+        return Promise.race([
+            promise,
+            new Promise((_, reject) => 
+                setTimeout(() => reject(new Error(errorMessage)), ms)
+            )
+        ]);
     }
 };

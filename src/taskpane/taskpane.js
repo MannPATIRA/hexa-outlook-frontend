@@ -26,7 +26,9 @@ const AppState = {
     // Current context mode (rfq-workflow, draft, clarification, quote)
     currentMode: 'rfq-workflow',
     // Current email context details
-    emailContext: null
+    emailContext: null,
+    // Parsed questions with AI responses
+    questions: []
 };
 
 // ==================== STATE PERSISTENCE ====================
@@ -62,6 +64,192 @@ function clearPersistedState() {
     }
 }
 
+// ==================== EMAIL ID MAPPING ====================
+// Maps Outlook message IDs to backend email_ids for API calls
+const EMAIL_ID_MAPPING_KEY = 'procurement_email_id_mapping';
+
+/**
+ * Store backend email_id for an Outlook message ID
+ * The backend returns an email_id from /classify that must be used for all subsequent API calls
+ */
+function storeEmailId(outlookMessageId, backendEmailId) {
+    try {
+        const mapping = JSON.parse(localStorage.getItem(EMAIL_ID_MAPPING_KEY) || '{}');
+        mapping[outlookMessageId] = backendEmailId;
+        localStorage.setItem(EMAIL_ID_MAPPING_KEY, JSON.stringify(mapping));
+        console.log(`Stored email_id mapping: ${outlookMessageId} -> ${backendEmailId}`);
+    } catch (e) {
+        console.error('Failed to store email_id:', e);
+    }
+}
+
+/**
+ * Retrieve stored backend email_id for an Outlook message ID
+ */
+function getStoredEmailId(outlookMessageId) {
+    try {
+        const mapping = JSON.parse(localStorage.getItem(EMAIL_ID_MAPPING_KEY) || '{}');
+        return mapping[outlookMessageId] || null;
+    } catch (e) {
+        console.error('Failed to get stored email_id:', e);
+        return null;
+    }
+}
+
+/**
+ * Store clarification_id for an email (needed for /suggest-response and /forward-to-engineering)
+ */
+function storeClarificationId(outlookMessageId, clarificationId) {
+    try {
+        const mapping = JSON.parse(localStorage.getItem(EMAIL_ID_MAPPING_KEY + '_clarifications') || '{}');
+        mapping[outlookMessageId] = clarificationId;
+        localStorage.setItem(EMAIL_ID_MAPPING_KEY + '_clarifications', JSON.stringify(mapping));
+        console.log(`Stored clarification_id mapping: ${outlookMessageId} -> ${clarificationId}`);
+    } catch (e) {
+        console.error('Failed to store clarification_id:', e);
+    }
+}
+
+/**
+ * Retrieve stored clarification_id for an Outlook message ID
+ */
+function getStoredClarificationId(outlookMessageId) {
+    try {
+        const mapping = JSON.parse(localStorage.getItem(EMAIL_ID_MAPPING_KEY + '_clarifications') || '{}');
+        return mapping[outlookMessageId] || null;
+    } catch (e) {
+        console.error('Failed to get stored clarification_id:', e);
+        return null;
+    }
+}
+
+/**
+ * Ensure an email has been classified by the backend
+ * If not already classified, calls /api/emails/classify first
+ * Returns the backend email_id needed for subsequent API calls
+ * 
+ * @param {Object} email - The email object with id, subject, body, from, etc.
+ * @param {string} expectedClassification - Expected type: 'quote' or 'clarification_request'
+ * @returns {Object} - { emailId, classification, supplierId, rfqId }
+ */
+async function ensureEmailClassified(email, expectedClassification) {
+    if (!email || !email.id) {
+        throw new Error('Invalid email object');
+    }
+    
+    // Check if we already have a stored backend email_id
+    let backendEmailId = getStoredEmailId(email.id);
+    
+    if (backendEmailId) {
+        console.log(`Email already classified, backend email_id: ${backendEmailId}`);
+        return {
+            emailId: backendEmailId,
+            classification: expectedClassification,
+            supplierId: email.from?.emailAddress?.address || 'unknown',
+            rfqId: EmailOperations.extractRfqId ? EmailOperations.extractRfqId(email.subject) : null
+        };
+    }
+    
+    console.log('Email not yet classified, calling /api/emails/classify...');
+    
+    // Build email chain for classification
+    const emailChain = [];
+    
+    // Try to get conversation emails if available
+    if (email.conversationId && AuthService.isSignedIn()) {
+        try {
+            const escapedConvId = email.conversationId.replace(/'/g, "''");
+            const response = await AuthService.graphRequest(
+                `/me/messages?$filter=conversationId eq '${escapedConvId}'&$select=id,subject,from,body,receivedDateTime&$top=20`
+            );
+            
+            if (response.value && response.value.length > 0) {
+                // Sort by date ascending (oldest first)
+                response.value.sort((a, b) => 
+                    new Date(a.receivedDateTime) - new Date(b.receivedDateTime)
+                );
+                
+                for (const convEmail of response.value) {
+                    emailChain.push({
+                        subject: convEmail.subject || '',
+                        body: convEmail.body?.content || '',
+                        from_email: convEmail.from?.emailAddress?.address || '',
+                        date: convEmail.receivedDateTime || new Date().toISOString()
+                    });
+                }
+            }
+        } catch (convError) {
+            console.warn('Failed to get conversation emails:', convError.message);
+        }
+    }
+    
+    // If no chain built, use just this email
+    if (emailChain.length === 0) {
+        emailChain.push({
+            subject: email.subject || '',
+            body: email.body?.content || email.bodyPreview || '',
+            from_email: email.from?.emailAddress?.address || '',
+            date: email.receivedDateTime || new Date().toISOString()
+        });
+    }
+    
+    // The most recent reply (the supplier's email)
+    const mostRecentReply = {
+        subject: email.subject || '',
+        body: email.body?.content || email.bodyPreview || '',
+        from_email: email.from?.emailAddress?.address || '',
+        date: email.receivedDateTime || new Date().toISOString()
+    };
+    
+    // Extract RFQ ID from subject
+    const rfqId = EmailOperations.extractRfqId ? 
+        EmailOperations.extractRfqId(email.subject) : 
+        (email.subject?.match(/MAT-\d+/)?.[0] || null);
+    
+    // Supplier ID is the sender's email
+    const supplierId = email.from?.emailAddress?.address || 'unknown';
+    
+    try {
+        // Call the classify API
+        const classifyResult = await ApiClient.classifyEmail(
+            emailChain,
+            mostRecentReply,
+            rfqId,
+            supplierId
+        );
+        
+        console.log('Classification result:', classifyResult);
+        
+        // Store the backend email_id for future use
+        if (classifyResult.email_id) {
+            storeEmailId(email.id, classifyResult.email_id);
+            backendEmailId = classifyResult.email_id;
+        } else {
+            // If backend doesn't return email_id, use outlook message id as fallback
+            console.warn('Backend did not return email_id, using Outlook message ID');
+            backendEmailId = email.id;
+        }
+        
+        return {
+            emailId: backendEmailId,
+            classification: classifyResult.classification || expectedClassification,
+            confidence: classifyResult.confidence,
+            supplierId: supplierId,
+            rfqId: rfqId
+        };
+    } catch (classifyError) {
+        console.error('Classification API failed:', classifyError);
+        // Return fallback using outlook message id
+        return {
+            emailId: email.id,
+            classification: expectedClassification,
+            supplierId: supplierId,
+            rfqId: rfqId,
+            error: classifyError.message
+        };
+    }
+}
+
 function restorePersistedState() {
     const state = getPersistedState();
     
@@ -78,7 +266,7 @@ function restorePersistedState() {
         Helpers.showSuccess(successMessage);
         console.log('Restored state:', successMessage);
         
-        // Clear the success flag but keep other state
+        // Clear all state
         clearPersistedState();
         return true; // Indicate state was restored
     }
@@ -559,10 +747,8 @@ function hideAllModes() {
         if (el) el.classList.add('hidden');
     });
     
-    // Show nav tabs and main content
-    const navTabs = document.querySelector('.nav-tabs');
+    // Show main content
     const mainContent = document.getElementById('main-content');
-    if (navTabs) navTabs.style.display = 'flex';
     if (mainContent) mainContent.style.display = 'block';
 }
 
@@ -573,10 +759,8 @@ function showMode(modeId) {
     console.log('showMode called with:', modeId);
     
     try {
-        // Hide nav tabs and main content
-        const navTabs = document.querySelector('.nav-tabs');
+        // Hide main content
         const mainContent = document.getElementById('main-content');
-        if (navTabs) navTabs.style.display = 'none';
         if (mainContent) mainContent.style.display = 'none';
         
         // Hide all mode containers first
@@ -595,7 +779,6 @@ function showMode(modeId) {
             console.error('Mode element not found:', modeId);
             // Fallback - show main content
             if (mainContent) mainContent.style.display = 'block';
-            if (navTabs) navTabs.style.display = 'flex';
         }
     } catch (error) {
         console.error('Error in showMode:', error);
@@ -659,6 +842,22 @@ function showRFQWorkflowMode() {
     console.log('Showing RFQ Workflow mode');
     hideAllModes();
     AppState.currentMode = 'rfq-workflow';
+    
+    // Show RFQ workflow section
+    const mainContent = document.getElementById('main-content');
+    const rfqWorkflowTab = document.getElementById('rfq-workflow-tab');
+    if (mainContent && rfqWorkflowTab) {
+        // Hide other tab sections
+        document.querySelectorAll('.tab-content').forEach(tab => {
+            tab.classList.remove('active');
+            tab.classList.add('hidden');
+        });
+        
+        // Show RFQ workflow
+        rfqWorkflowTab.classList.remove('hidden');
+        rfqWorkflowTab.classList.add('active');
+        mainContent.style.display = 'block';
+    }
 }
 
 /**
@@ -678,9 +877,17 @@ async function showDraftMode(context) {
  */
 async function loadPendingDrafts() {
     const listContainer = document.getElementById('pending-drafts-list');
+    const draftActionsSection = document.getElementById('draft-actions-section');
+    const sendStatus = document.getElementById('draft-send-status');
+    const progressTracker = document.getElementById('rfq-progress-tracker');
+    
     if (!listContainer) return;
     
     listContainer.innerHTML = '<p class="loading-text">Loading drafts...</p>';
+    
+    // Hide progress elements (those are for during/after sending)
+    if (sendStatus) sendStatus.classList.add('hidden');
+    if (progressTracker) progressTracker.classList.add('hidden');
     
     if (!AuthService.isSignedIn()) {
         listContainer.innerHTML = '<p class="loading-text">Please sign in to view drafts</p>';
@@ -688,15 +895,54 @@ async function loadPendingDrafts() {
     }
     
     try {
-        // Get drafts from the Drafts folder that look like RFQs
-        const drafts = await AuthService.graphRequest(
-            `/me/mailFolders/Drafts/messages?$filter=startswith(subject,'RFQ for')&$select=id,subject,toRecipients,createdDateTime&$top=20&$orderby=createdDateTime desc`
-        );
+        // Try to get drafts - use a simpler query if the filter fails
+        let drafts = null;
+        try {
+            drafts = await AuthService.graphRequest(
+                `/me/mailFolders/Drafts/messages?$filter=startswith(subject,'RFQ for')&$select=id,subject,toRecipients,createdDateTime&$top=20&$orderby=createdDateTime desc`
+            );
+        } catch (filterError) {
+            // If filter fails, try without filter (get all drafts)
+            console.warn('Filter query failed, trying without filter:', filterError);
+            try {
+                drafts = await AuthService.graphRequest(
+                    `/me/mailFolders/Drafts/messages?$select=id,subject,toRecipients,createdDateTime&$top=20&$orderby=createdDateTime desc`
+                );
+                // Filter client-side
+                if (drafts.value) {
+                    drafts.value = drafts.value.filter(d => 
+                        d.subject && d.subject.toLowerCase().startsWith('rfq for')
+                    );
+                }
+            } catch (simpleError) {
+                console.error('Both draft queries failed:', simpleError);
+                // Still show the send button - user is viewing a draft
+                listContainer.innerHTML = `
+                    <div class="no-drafts-message">
+                        <div class="icon">📝</div>
+                        <p>You're viewing an RFQ draft. Click "Send All RFQ Drafts" to send all pending drafts.</p>
+                    </div>
+                `;
+                if (draftActionsSection) draftActionsSection.classList.remove('hidden');
+                const sendBtn = document.getElementById('send-all-drafts-btn');
+                if (sendBtn) sendBtn.disabled = false;
+                return;
+            }
+        }
         
         if (!drafts.value || drafts.value.length === 0) {
-            listContainer.innerHTML = '<p class="loading-text">No RFQ drafts found. Generate RFQs in the workflow first.</p>';
+            listContainer.innerHTML = `
+                <div class="no-drafts-message">
+                    <div class="icon">📋</div>
+                    <p>No RFQ drafts found. Generate RFQs in the workflow first.</p>
+                </div>
+            `;
+            if (draftActionsSection) draftActionsSection.classList.add('hidden');
             return;
         }
+        
+        // Show draft actions
+        if (draftActionsSection) draftActionsSection.classList.remove('hidden');
         
         // Render the drafts
         listContainer.innerHTML = drafts.value.map(draft => {
@@ -720,7 +966,463 @@ async function loadPendingDrafts() {
         
     } catch (error) {
         console.error('Error loading drafts:', error);
-        listContainer.innerHTML = '<p class="loading-text">Error loading drafts. Please try again.</p>';
+        // Don't show error - just show a helpful message
+        listContainer.innerHTML = `
+            <div class="no-drafts-message">
+                <div class="icon">📝</div>
+                <p>You're viewing an RFQ draft. Click "Send All RFQ Drafts" to send all pending drafts.</p>
+            </div>
+        `;
+        if (draftActionsSection) draftActionsSection.classList.remove('hidden');
+        const sendBtn = document.getElementById('send-all-drafts-btn');
+        if (sendBtn) sendBtn.disabled = false;
+    }
+}
+
+/**
+ * Load and display RFQ progress (sent, auto-replies, sorted)
+ */
+async function loadRfqProgress(state) {
+    const sentCount = state.sentCount || 0;
+    const autoRepliesScheduled = state.autoRepliesScheduled || 0;
+    
+    // Update sent RFQs
+    const sentRfqCount = document.getElementById('sent-rfq-count');
+    if (sentRfqCount) sentRfqCount.textContent = sentCount.toString();
+    
+    // Update auto-replies scheduled
+    const scheduledCount = document.getElementById('auto-replies-scheduled-count');
+    const scheduledProgress = document.getElementById('auto-replies-scheduled-progress');
+    if (scheduledCount) scheduledCount.textContent = autoRepliesScheduled.toString();
+    if (scheduledProgress) scheduledProgress.style.width = '100%';
+    
+    // Helper to check if email is an undeliverable/bounceback
+    const isUndeliverable = (email) => {
+        const subject = (email.subject || '').toLowerCase();
+        const from = (email.from?.emailAddress?.address || '').toLowerCase();
+        const fromName = (email.from?.emailAddress?.name || '').toLowerCase();
+        
+        if (subject.includes('undeliverable') || 
+            subject.includes('delivery failure') ||
+            subject.includes('delivery has failed') ||
+            subject.includes('mail delivery failed') ||
+            from.includes('postmaster') ||
+            from.includes('mailer-daemon') ||
+            from.includes('noreply') && subject.includes('failed') ||
+            fromName.includes('postmaster') ||
+            fromName.includes('mailer-daemon')) {
+            return true;
+        }
+        return false;
+    };
+    
+    // Helper to check if email is a real supplier reply
+    const isSupplierReply = (email) => {
+        const subject = (email.subject || '').toLowerCase();
+        return subject.includes('rfq') && !isUndeliverable(email);
+    };
+    
+    // Try to count actual replies received
+    let repliesReceived = 0;
+    let repliesSorted = 0;
+    const allReplyIds = new Set(); // Track unique reply IDs
+    
+    if (AuthService.isSignedIn()) {
+        try {
+            // Step 1: Get all mail folders to find Quotes and Clarification folders
+            let quoteFolders = [];
+            let clarificationFolders = [];
+            
+            const allFolders = await AuthService.graphRequest(
+                `/me/mailFolders?$select=id,displayName,parentFolderId&$top=500`
+            );
+            
+            if (allFolders.value) {
+                for (const folder of allFolders.value) {
+                    const folderName = (folder.displayName || '').toLowerCase();
+                    if (folderName.includes('quote') && !folderName.includes('sent')) {
+                        quoteFolders.push(folder.id);
+                    }
+                    if (folderName.includes('clarification') && !folderName.includes('awaiting')) {
+                        clarificationFolders.push(folder.id);
+                    }
+                }
+            }
+            
+            // Step 2: Count emails in sorted folders (Quotes and Clarifications)
+            for (const folderId of quoteFolders) {
+                try {
+                    const folderEmails = await AuthService.graphRequest(
+                        `/me/mailFolders/${folderId}/messages?$select=id,subject,from&$top=100`
+                    );
+                    if (folderEmails.value) {
+                        for (const email of folderEmails.value) {
+                            if (isSupplierReply(email) && !allReplyIds.has(email.id)) {
+                                allReplyIds.add(email.id);
+                                repliesReceived++;
+                                repliesSorted++;
+                            }
+                        }
+                    }
+                } catch (e) {
+                    // Ignore errors
+                }
+            }
+            
+            for (const folderId of clarificationFolders) {
+                try {
+                    const folderEmails = await AuthService.graphRequest(
+                        `/me/mailFolders/${folderId}/messages?$select=id,subject,from&$top=100`
+                    );
+                    if (folderEmails.value) {
+                        for (const email of folderEmails.value) {
+                            if (isSupplierReply(email) && !allReplyIds.has(email.id)) {
+                                allReplyIds.add(email.id);
+                                repliesReceived++;
+                                repliesSorted++;
+                            }
+                        }
+                    }
+                } catch (e) {
+                    // Ignore errors
+                }
+            }
+            
+            // Step 3: Count RFQ-related emails in inbox (not yet sorted)
+            const inboxReplies = await AuthService.graphRequest(
+                `/me/mailFolders/inbox/messages?$filter=contains(subject,'RFQ')&$top=100&$select=id,subject,from&$orderby=receivedDateTime desc`
+            );
+            
+            if (inboxReplies.value) {
+                for (const email of inboxReplies.value) {
+                    if (isSupplierReply(email) && !allReplyIds.has(email.id)) {
+                        allReplyIds.add(email.id);
+                        repliesReceived++;
+                        // Not sorted yet, so don't increment repliesSorted
+                    }
+                }
+            }
+            
+        } catch (err) {
+            console.warn('Error counting replies:', err);
+        }
+    }
+    
+    // Update replies received
+    const receivedCount = document.getElementById('replies-received-count');
+    const receivedProgress = document.getElementById('replies-received-progress');
+    if (receivedCount) receivedCount.textContent = `${repliesReceived} / ${sentCount}`;
+    if (receivedProgress && sentCount > 0) {
+        receivedProgress.style.width = `${Math.min(100, (repliesReceived / sentCount) * 100)}%`;
+    }
+    
+    // Update replies sorted
+    const sortedCount = document.getElementById('replies-sorted-count');
+    const sortedProgress = document.getElementById('replies-sorted-progress');
+    if (sortedCount) sortedCount.textContent = `${repliesSorted} / ${repliesReceived}`;
+    if (sortedProgress && repliesReceived > 0) {
+        sortedProgress.style.width = `${Math.min(100, (repliesSorted / repliesReceived) * 100)}%`;
+    } else if (sortedProgress && repliesReceived === 0) {
+        sortedProgress.style.width = '0%';
+    }
+}
+
+/**
+ * Render question cards with expandable functionality
+ * @param {Array} questions - Array of question objects
+ * @param {Object} email - Email context
+ */
+function renderQuestionCards(questions, email) {
+    const questionsList = document.getElementById('clarification-questions-list');
+    if (!questionsList) return;
+    
+    questionsList.innerHTML = '';
+    
+    // Group questions by category
+    const questionsByCategory = {};
+    questions.forEach(q => {
+        const category = q.category || 'General Questions';
+        if (!questionsByCategory[category]) {
+            questionsByCategory[category] = [];
+        }
+        questionsByCategory[category].push(q);
+    });
+    
+    let globalQuestionIndex = 0;
+    
+    Object.keys(questionsByCategory).forEach(category => {
+        const categoryQuestions = questionsByCategory[category];
+        
+        // Add category header if multiple categories
+        if (Object.keys(questionsByCategory).length > 1) {
+            const categoryHeader = document.createElement('div');
+            categoryHeader.className = 'question-category-header';
+            categoryHeader.textContent = category;
+            questionsList.appendChild(categoryHeader);
+        }
+        
+        // Create card for each question
+        categoryQuestions.forEach((q) => {
+            globalQuestionIndex++;
+            q.displayIndex = globalQuestionIndex;
+            
+            const questionCard = document.createElement('div');
+            questionCard.className = 'question-card';
+            questionCard.dataset.questionId = q.id;
+            
+            // Card header (always visible)
+            const cardHeader = document.createElement('div');
+            cardHeader.className = 'question-card-header';
+            cardHeader.onclick = () => toggleQuestionCard(q.id);
+            
+            const headerContent = document.createElement('div');
+            headerContent.className = 'question-card-header-content';
+            
+            const questionNumber = document.createElement('span');
+            questionNumber.className = 'question-number';
+            questionNumber.textContent = `${globalQuestionIndex}.`;
+            
+            const questionText = document.createElement('div');
+            questionText.className = 'question-text';
+            questionText.textContent = q.question;
+            
+            const expandIcon = document.createElement('span');
+            expandIcon.className = 'question-expand-icon';
+            expandIcon.innerHTML = q.isExpanded ? '▼' : '▶';
+            
+            headerContent.appendChild(questionNumber);
+            headerContent.appendChild(questionText);
+            cardHeader.appendChild(headerContent);
+            cardHeader.appendChild(expandIcon);
+            
+            // Card content (expandable)
+            const cardContent = document.createElement('div');
+            cardContent.className = 'question-card-content';
+            cardContent.style.display = q.isExpanded ? 'block' : 'none';
+            
+            // AI Response section
+            const aiSection = document.createElement('div');
+            aiSection.className = 'ai-response-section';
+            
+            const aiLabel = document.createElement('label');
+            aiLabel.className = 'response-label';
+            aiLabel.textContent = 'AI Response';
+            
+            const aiTextarea = document.createElement('textarea');
+            aiTextarea.className = 'response-textarea ai-response-textarea';
+            aiTextarea.rows = 4;
+            aiTextarea.value = q.aiResponse || '';
+            aiTextarea.placeholder = q.isLoadingResponse ? 'Generating...' : 'AI response';
+            aiTextarea.disabled = q.isLoadingResponse;
+            aiTextarea.oninput = (e) => {
+                const question = AppState.questions.find(qq => qq.id === q.id);
+                if (question) question.aiResponse = e.target.value;
+            };
+            
+            const aiLoading = document.createElement('div');
+            aiLoading.className = 'response-loading';
+            aiLoading.style.display = q.isLoadingResponse ? 'flex' : 'none';
+            aiLoading.innerHTML = '<div class="spinner-small"></div><span>Generating AI response...</span>';
+            
+            aiSection.appendChild(aiLabel);
+            aiSection.appendChild(aiTextarea);
+            aiSection.appendChild(aiLoading);
+            
+            // Custom Response section
+            const customSection = document.createElement('div');
+            customSection.className = 'custom-response-section';
+            
+            const customLabel = document.createElement('label');
+            customLabel.className = 'response-label';
+            customLabel.textContent = 'Custom Response';
+            
+            const customTextarea = document.createElement('textarea');
+            customTextarea.className = 'response-textarea custom-response-textarea';
+            customTextarea.rows = 4;
+            customTextarea.value = q.customResponse || '';
+            customTextarea.placeholder = 'Optional custom response';
+            customTextarea.oninput = (e) => {
+                const question = AppState.questions.find(qq => qq.id === q.id);
+                if (question) question.customResponse = e.target.value;
+            };
+            
+            const useCustomCheckbox = document.createElement('label');
+            useCustomCheckbox.className = 'use-custom-checkbox';
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.checked = q.useCustomResponse;
+            checkbox.onchange = (e) => {
+                const question = AppState.questions.find(qq => qq.id === q.id);
+                if (question) question.useCustomResponse = e.target.checked;
+            };
+            useCustomCheckbox.appendChild(checkbox);
+            useCustomCheckbox.appendChild(document.createTextNode(' Use custom response'));
+            
+            customSection.appendChild(customLabel);
+            customSection.appendChild(customTextarea);
+            customSection.appendChild(useCustomCheckbox);
+            
+            cardContent.appendChild(aiSection);
+            cardContent.appendChild(customSection);
+            
+            questionCard.appendChild(cardHeader);
+            questionCard.appendChild(cardContent);
+            questionsList.appendChild(questionCard);
+        });
+    });
+}
+
+/**
+ * Toggle question card expand/collapse
+ */
+function toggleQuestionCard(questionId) {
+    const question = AppState.questions.find(q => q.id === questionId);
+    if (!question) return;
+    
+    question.isExpanded = !question.isExpanded;
+    
+    const card = document.querySelector(`[data-question-id="${questionId}"]`);
+    if (!card) return;
+    
+    const content = card.querySelector('.question-card-content');
+    const icon = card.querySelector('.question-expand-icon');
+    
+    if (content) {
+        content.style.display = question.isExpanded ? 'block' : 'none';
+    }
+    if (icon) {
+        icon.innerHTML = question.isExpanded ? '▼' : '▶';
+    }
+}
+
+/**
+ * Generate AI responses for all questions
+ */
+async function generateAIResponsesForQuestions(questions, email) {
+    const emailContext = {
+        subject: email.subject || '',
+        body: email.body?.content || '',
+        rfqContext: '' // Can be enhanced with RFQ details if available
+    };
+    
+    // Generate responses for each question sequentially to avoid rate limiting
+    for (const question of questions) {
+        question.isLoadingResponse = true;
+        updateQuestionCard(question.id);
+        
+        try {
+            const aiResponse = await OpenAIService.generateResponse(question.question, emailContext);
+            question.aiResponse = aiResponse;
+            question.hasError = false;
+        } catch (error) {
+            console.error(`Error generating response for question ${question.id}:`, error);
+            question.hasError = true;
+            question.aiResponse = 'Error generating response. Please provide a custom response.';
+        } finally {
+            question.isLoadingResponse = false;
+            updateQuestionCard(question.id);
+        }
+    }
+}
+
+/**
+ * Update a specific question card in the DOM
+ */
+function updateQuestionCard(questionId) {
+    const question = AppState.questions.find(q => q.id === questionId);
+    if (!question) return;
+    
+    const card = document.querySelector(`[data-question-id="${questionId}"]`);
+    if (!card) return;
+    
+    const aiTextarea = card.querySelector('.ai-response-textarea');
+    const aiLoading = card.querySelector('.response-loading');
+    
+    if (aiTextarea) {
+        aiTextarea.value = question.aiResponse || '';
+        aiTextarea.disabled = question.isLoadingResponse;
+        aiTextarea.placeholder = question.isLoadingResponse ? 'Generating AI response...' : 'AI response will appear here';
+    }
+    
+    if (aiLoading) {
+        aiLoading.style.display = question.isLoadingResponse ? 'flex' : 'none';
+    }
+}
+
+/**
+ * Parse questions from email body using OpenAI (with fallback to pattern matching)
+ * @param {Object} email - Email object with body content
+ * @returns {Promise<Array>} Array of parsed questions
+ */
+async function parseAndDisplayQuestions(email) {
+    const questionsList = document.getElementById('clarification-questions-list');
+    const questionBox = document.getElementById('clarification-question-text');
+    
+    // Show loading state
+    if (questionsList) {
+        questionsList.innerHTML = '<div class="loading-indicator"><div class="spinner-small"></div><span>Parsing questions with AI...</span></div>';
+        questionsList.classList.remove('hidden');
+    }
+    if (questionBox) questionBox.classList.add('hidden');
+    
+    let parsedQuestions = [];
+    
+    if (email.body?.content) {
+        try {
+            // Try OpenAI parsing first
+            console.log('Attempting OpenAI question parsing...');
+            parsedQuestions = await OpenAIService.parseQuestions(email.body.content, email.subject || '');
+            console.log(`OpenAI parsed ${parsedQuestions.length} questions`);
+        } catch (openaiError) {
+            console.warn('OpenAI parsing failed, falling back to pattern matching:', openaiError);
+            // Fallback to pattern matching
+            try {
+                parsedQuestions = Helpers.parseClarificationQuestions(email.body.content);
+                console.log(`Pattern matching parsed ${parsedQuestions.length} questions`);
+            } catch (patternError) {
+                console.error('Both parsing methods failed:', patternError);
+            }
+        }
+        
+        // Initialize questions with empty responses
+        AppState.questions = parsedQuestions.map((q, index) => ({
+            id: `q${index + 1}`,
+            question: q.question,
+            category: q.category || 'General Questions',
+            section_number: q.section_number || null,
+            aiResponse: '',
+            customResponse: '',
+            useCustomResponse: false,
+            isExpanded: false,
+            isLoadingResponse: false,
+            hasError: false
+        }));
+        
+        if (AppState.questions.length > 0) {
+            // Render question cards
+            renderQuestionCards(AppState.questions, email);
+            
+            // Generate AI responses for each question (async, don't await)
+            generateAIResponsesForQuestions(AppState.questions, email).catch(err => {
+                console.error('Error generating AI responses:', err);
+            });
+        } else {
+            // No questions parsed - fallback to showing full body text
+            if (questionsList) questionsList.classList.add('hidden');
+            if (questionBox) {
+                questionBox.classList.remove('hidden');
+                const bodyText = Helpers.stripHtml(email.body.content);
+                const truncatedBody = bodyText.length > 500 ? bodyText.substring(0, 500) + '...' : bodyText;
+                questionBox.textContent = truncatedBody;
+            }
+        }
+    } else {
+        // No email body available
+        if (questionsList) questionsList.classList.add('hidden');
+        if (questionBox) {
+            questionBox.classList.remove('hidden');
+            questionBox.textContent = 'Email body not available';
+        }
     }
 }
 
@@ -736,6 +1438,12 @@ async function showClarificationMode(context) {
         
         const email = context.email;
         const originalRfq = context.originalRfq; // May be present if opened from sent RFQ
+        
+        // Store email context for button handlers
+        AppState.emailContext = {
+            email: email,
+            originalRfq: originalRfq
+        };
         
         if (!email) {
             console.error('No email data in context');
@@ -774,22 +1482,8 @@ async function showClarificationMode(context) {
             emailInfoBox.innerHTML = html;
         }
         
-        // Extract and display the question
-        const questionBox = document.getElementById('clarification-question-text');
-        if (questionBox) {
-            if (email.body?.content) {
-                const bodyText = Helpers.stripHtml(email.body.content);
-                const truncatedBody = bodyText.length > 500 ? bodyText.substring(0, 500) + '...' : bodyText;
-                questionBox.textContent = truncatedBody;
-            } else {
-                questionBox.textContent = 'Email body not available';
-            }
-        }
-        
-        // Get suggested response from API (don't await - let it load in background)
-        loadSuggestedResponse(email).catch(err => {
-            console.error('Error loading suggested response:', err);
-        });
+        // Parse and display questions separately using OpenAI (with fallback)
+        await parseAndDisplayQuestions(email);
         
     } catch (error) {
         console.error('Error in showClarificationMode:', error);
@@ -798,52 +1492,103 @@ async function showClarificationMode(context) {
 }
 
 /**
- * Load suggested response for a clarification email
+ * Process a clarification email via the proper backend API flow:
+ * 1. Ensure email is classified (get backend email_id)
+ * 2. Call /api/emails/process to get sub_classification and suggested_response
+ * 3. If requires_engineering, show forward button; otherwise show suggested response
  */
-async function loadSuggestedResponse(email) {
+async function processClarificationEmail(email) {
     const loadingEl = document.getElementById('suggested-answer-loading');
     const contentEl = document.getElementById('suggested-answer-content');
     const textareaEl = document.getElementById('clarification-response-text');
+    const engineerBtnContainer = document.getElementById('forward-engineer-container');
     
     if (loadingEl) loadingEl.classList.remove('hidden');
     if (contentEl) contentEl.classList.add('hidden');
+    if (engineerBtnContainer) engineerBtnContainer.classList.add('hidden');
     
     try {
-        // Extract question from body
-        const bodyText = email.body?.content ? Helpers.stripHtml(email.body.content) : '';
+        // Step 1: Ensure email is classified and get backend email_id
+        console.log('Step 1: Ensuring email is classified...');
+        const classifyResult = await ensureEmailClassified(email, 'clarification_request');
+        const backendEmailId = classifyResult.emailId;
+        console.log('Backend email_id:', backendEmailId);
         
-        let suggestedResponse = '';
-        
-        // Try API first
+        // Step 2: Call /api/emails/process to get sub_classification and suggested_response
+        console.log('Step 2: Calling /api/emails/process...');
+        let processResult;
         try {
-            const result = await ApiClient.suggestResponse(
-                email.id,
-                email.id,
-                bodyText.substring(0, 1000) // Limit question length
-            );
-            suggestedResponse = result.suggested_response || '';
-            console.log('Suggested response from API received');
-        } catch (apiError) {
-            console.warn('API suggestion failed:', apiError.message);
-            // Generate a basic template response
-            suggestedResponse = generateFallbackResponse(email, bodyText);
+            processResult = await ApiClient.processEmail(backendEmailId, 'clarification_request');
+            console.log('Process result:', processResult);
+            
+            // Store clarification_id for future use (e.g., regenerating response)
+            if (processResult.clarification_id) {
+                storeClarificationId(email.id, processResult.clarification_id);
+            }
+        } catch (processError) {
+            console.warn('/api/emails/process failed:', processError.message);
+            // Fall back to generating a template response
+            processResult = {
+                suggested_response: generateFallbackResponse(email, email.body?.content || ''),
+                requires_engineering: false
+            };
         }
         
+        // Step 3: Handle based on sub_classification
         if (loadingEl) loadingEl.classList.add('hidden');
         if (contentEl) contentEl.classList.remove('hidden');
         
-        if (textareaEl) {
-            textareaEl.value = suggestedResponse || 'Please compose your reply manually.';
+        if (processResult.requires_engineering) {
+            // Show "Forward to Engineering" UI
+            console.log('Clarification requires engineering review');
+            if (engineerBtnContainer) {
+                engineerBtnContainer.classList.remove('hidden');
+            }
+            if (textareaEl) {
+                textareaEl.value = processResult.suggested_response || 
+                    'This clarification requires engineering review. Please forward to your engineering team.';
+                textareaEl.disabled = true;
+            }
+            // Store email info for forwarding
+            AppState.currentClarification = {
+                email: email,
+                backendEmailId: backendEmailId,
+                clarificationId: processResult.clarification_id,
+                question: processResult.question
+            };
+        } else {
+            // Show suggested response for procurement clarification
+            console.log('Procurement clarification - showing suggested response');
+            if (textareaEl) {
+                textareaEl.value = processResult.suggested_response || 
+                    generateFallbackResponse(email, email.body?.content || '');
+                textareaEl.disabled = false;
+            }
+            // Store email info for sending reply
+            AppState.currentClarification = {
+                email: email,
+                backendEmailId: backendEmailId,
+                clarificationId: processResult.clarification_id,
+                question: processResult.question
+            };
         }
         
     } catch (error) {
-        console.error('Error getting suggested response:', error);
+        console.error('Error processing clarification email:', error);
         if (loadingEl) loadingEl.classList.add('hidden');
         if (contentEl) contentEl.classList.remove('hidden');
         if (textareaEl) {
             textareaEl.value = generateFallbackResponse(email, '');
         }
     }
+}
+
+/**
+ * Load suggested response for a clarification email (legacy - now calls processClarificationEmail)
+ * @deprecated Use processClarificationEmail instead
+ */
+async function loadSuggestedResponse(email) {
+    return processClarificationEmail(email);
 }
 
 /**
@@ -926,7 +1671,10 @@ async function showQuoteMode(context) {
 }
 
 /**
- * Load and parse quote data from email
+ * Load and parse quote data from email using proper API flow:
+ * 1. Ensure email is classified (get backend email_id)
+ * 2. Call /api/emails/process to confirm quote is ready
+ * 3. Call /api/emails/extract-quote to get structured data
  */
 async function loadParsedQuoteData(email) {
     const loadingEl = document.getElementById('quote-loading');
@@ -985,16 +1733,43 @@ async function loadParsedQuoteData(email) {
         
         let details = {};
         
-        // Try API first
+        // Try API with proper flow
         try {
+            // Step 1: Ensure email is classified and get backend email_id
+            console.log('Step 1: Ensuring quote email is classified...');
+            const classifyResult = await ensureEmailClassified(email, 'quote');
+            const backendEmailId = classifyResult.emailId;
+            console.log('Backend email_id:', backendEmailId);
+            
+            // Step 2: Call /api/emails/process to confirm quote is ready
+            console.log('Step 2: Calling /api/emails/process for quote...');
+            try {
+                const processResult = await ApiClient.processEmail(backendEmailId, 'quote');
+                console.log('Process result:', processResult);
+            } catch (processError) {
+                // Process might fail but we can still try to extract
+                console.warn('/api/emails/process failed (continuing anyway):', processError.message);
+            }
+            
+            // Step 3: Call /api/emails/extract-quote to get structured data
+            console.log('Step 3: Calling /api/emails/extract-quote...');
             const result = await ApiClient.extractQuote(
-                email.id,
+                backendEmailId,
                 rfqId,
                 supplierEmail,
                 bodyContent
             );
             details = result.extracted_details || result || {};
             console.log('Quote extracted via API:', details);
+            
+            // Store quote info for later use
+            AppState.currentQuote = {
+                email: email,
+                backendEmailId: backendEmailId,
+                quoteId: result.quote_id,
+                rfqId: rfqId,
+                details: details
+            };
         } catch (apiError) {
             console.warn('API quote extraction failed, using fallback:', apiError.message);
             details = extractFromBody();
@@ -1044,27 +1819,63 @@ async function handleSendAllDraftsFromDraftMode() {
     }
     
     const sendBtn = document.getElementById('send-all-drafts-btn');
-    const statusEl = document.getElementById('draft-send-status');
-    const progressText = document.getElementById('draft-progress-text');
-    const progressFill = document.getElementById('draft-progress-fill');
+    const draftListSection = document.getElementById('draft-list-section');
+    const draftActionsSection = document.getElementById('draft-actions-section');
+    const progressTracker = document.getElementById('rfq-progress-tracker');
+    
+    // Progress tracker elements
+    const sentRfqCount = document.getElementById('sent-rfq-count');
+    const sentRfqProgress = document.getElementById('sent-rfq-progress');
+    const autoRepliesScheduledCount = document.getElementById('auto-replies-scheduled-count');
+    const autoRepliesScheduledProgress = document.getElementById('auto-replies-scheduled-progress');
+    const repliesReceivedCount = document.getElementById('replies-received-count');
+    const repliesReceivedProgress = document.getElementById('replies-received-progress');
+    const repliesSortedCount = document.getElementById('replies-sorted-count');
+    const repliesSortedProgress = document.getElementById('replies-sorted-progress');
     
     try {
-        // Show progress UI
+        // Hide draft list, show progress tracker
+        if (draftListSection) draftListSection.classList.add('hidden');
+        if (draftActionsSection) draftActionsSection.classList.add('hidden');
+        if (progressTracker) progressTracker.classList.remove('hidden');
         if (sendBtn) sendBtn.disabled = true;
-        if (statusEl) statusEl.classList.remove('hidden');
+        
+        // Initialize progress bars
+        if (sentRfqCount) sentRfqCount.textContent = '0';
+        if (sentRfqProgress) sentRfqProgress.style.width = '0%';
+        if (autoRepliesScheduledCount) autoRepliesScheduledCount.textContent = '0';
+        if (autoRepliesScheduledProgress) autoRepliesScheduledProgress.style.width = '0%';
+        if (repliesReceivedCount) repliesReceivedCount.textContent = '0 / 0';
+        if (repliesReceivedProgress) repliesReceivedProgress.style.width = '0%';
+        if (repliesSortedCount) repliesSortedCount.textContent = '0 / 0';
+        if (repliesSortedProgress) repliesSortedProgress.style.width = '0%';
         
         // Get all RFQ drafts
-        if (progressText) progressText.textContent = 'Finding RFQ drafts...';
-        const draftsResponse = await AuthService.graphRequest(
-            `/me/mailFolders/Drafts/messages?$filter=startswith(subject,'RFQ for')&$select=id,subject,toRecipients,body&$top=50`
-        );
+        let draftsResponse;
+        try {
+            draftsResponse = await AuthService.graphRequest(
+                `/me/mailFolders/Drafts/messages?$filter=startswith(subject,'RFQ for')&$select=id,subject,toRecipients,body&$top=50`
+            );
+        } catch (filterError) {
+            // Try without filter
+            draftsResponse = await AuthService.graphRequest(
+                `/me/mailFolders/Drafts/messages?$select=id,subject,toRecipients,body&$top=50`
+            );
+            if (draftsResponse.value) {
+                draftsResponse.value = draftsResponse.value.filter(d => 
+                    d.subject && d.subject.toLowerCase().startsWith('rfq for')
+                );
+            }
+        }
         
         const drafts = draftsResponse.value || [];
         
         if (drafts.length === 0) {
             Helpers.showError('No RFQ drafts found');
+            if (draftListSection) draftListSection.classList.remove('hidden');
+            if (draftActionsSection) draftActionsSection.classList.remove('hidden');
+            if (progressTracker) progressTracker.classList.add('hidden');
             if (sendBtn) sendBtn.disabled = false;
-            if (statusEl) statusEl.classList.add('hidden');
             return;
         }
         
@@ -1078,45 +1889,54 @@ async function handleSendAllDraftsFromDraftMode() {
         const otherDrafts = drafts.filter(d => d.id !== currentDraftId);
         const currentDraft = drafts.find(d => d.id === currentDraftId);
         
+        const totalDrafts = drafts.length;
+        
         // Persist initial state
         persistState({
             sendingInProgress: true,
-            totalDrafts: drafts.length,
+            totalDrafts: totalDrafts,
             sentCount: 0,
             autoRepliesScheduled: 0
         });
         
         let sentCount = 0;
         let autoRepliesScheduled = 0;
-        const totalDrafts = drafts.length;
+        
+        // Update progress function
+        const updateProgress = () => {
+            // Update sent RFQs
+            if (sentRfqCount) sentRfqCount.textContent = sentCount.toString();
+            if (sentRfqProgress) sentRfqProgress.style.width = `${(sentCount / totalDrafts) * 100}%`;
+            
+            // Update auto-replies scheduled
+            if (autoRepliesScheduledCount) autoRepliesScheduledCount.textContent = autoRepliesScheduled.toString();
+            if (autoRepliesScheduledProgress) autoRepliesScheduledProgress.style.width = `${(autoRepliesScheduled / totalDrafts) * 100}%`;
+            
+            // Update replies received (will be updated by monitoring)
+            if (repliesReceivedCount) repliesReceivedCount.textContent = `0 / ${sentCount}`;
+            if (repliesReceivedProgress) repliesReceivedProgress.style.width = '0%';
+            
+            // Update replies sorted
+            if (repliesSortedCount) repliesSortedCount.textContent = '0 / 0';
+            if (repliesSortedProgress) repliesSortedProgress.style.width = '0%';
+        };
         
         // STEP 1: Send ALL OTHER drafts first (not the current one)
-        // For each, complete the ENTIRE workflow before moving to next
         for (const draft of otherDrafts) {
             try {
                 const recipient = draft.toRecipients?.[0]?.emailAddress?.address || 'unknown';
-                if (progressText) progressText.textContent = `Sending to ${recipient}... (${sentCount + 1}/${totalDrafts})`;
-                if (progressFill) progressFill.style.width = `${((sentCount + 0.3) / totalDrafts) * 100}%`;
+                console.log(`Sending to ${recipient}... (${sentCount + 1}/${totalDrafts})`);
                 
                 // Send the draft and get the sent email details
                 const sendResult = await sendDraftEmailWithFullWorkflow(draft);
                 sentCount++;
                 
-                // Update UI
-                const draftItem = document.querySelector(`[data-draft-id="${draft.id}"]`);
-                if (draftItem) {
-                    const statusBadge = draftItem.querySelector('.draft-item-status');
-                    if (statusBadge) {
-                        statusBadge.textContent = 'Sent';
-                        statusBadge.classList.add('sent');
-                    }
-                }
-                
-                if (progressFill) progressFill.style.width = `${((sentCount) / totalDrafts) * 100}%`;
-                
                 if (sendResult.autoReplyScheduled) {
                     autoRepliesScheduled++;
                 }
+                
+                // Update progress bars
+                updateProgress();
                 
                 // Update persisted state after each successful send
                 persistState({ sentCount, autoRepliesScheduled });
@@ -1136,16 +1956,18 @@ async function handleSendAllDraftsFromDraftMode() {
                 sentCount,
                 autoRepliesScheduled
             });
-            if (progressFill) progressFill.style.width = '100%';
-            if (progressText) progressText.textContent = `✓ Sent ${sentCount} RFQ(s)! Auto-replies: ${autoRepliesScheduled}`;
+            updateProgress();
+            
+            // Start monitoring for replies
+            startReplyMonitoring(sentCount, updateProgress);
+            
             Helpers.showSuccess(`Sent ${sentCount} RFQ(s) successfully! ${autoRepliesScheduled} auto-replies scheduled.`);
             return;
         }
         
         // STEP 3: Send the CURRENT draft last
         // After this, the add-in WILL close because we're viewing this draft
-        if (progressText) progressText.textContent = `Sending final draft... Panel will close shortly.`;
-        if (progressFill) progressFill.style.width = '95%';
+        console.log('Sending final draft... Panel will close shortly.');
         
         // Mark state as complete BEFORE sending current draft (because we won't get a chance after)
         persistState({ 
@@ -1155,6 +1977,11 @@ async function handleSendAllDraftsFromDraftMode() {
             autoRepliesScheduled: autoRepliesScheduled + 1, // Assume it will work
             showSuccessOnReopen: true
         });
+        
+        // Update progress to show final state
+        sentCount++;
+        autoRepliesScheduled++;
+        updateProgress();
         
         // Small delay so user sees the message
         await new Promise(resolve => setTimeout(resolve, 500));
@@ -1173,9 +2000,173 @@ async function handleSendAllDraftsFromDraftMode() {
         console.error('Error in send all drafts:', error);
         Helpers.showError('Error sending drafts: ' + error.message);
         persistState({ sendingInProgress: false, lastSendResult: 'error', errorMessage: error.message });
-    } finally {
+        
+        // Restore UI on error
+        if (draftListSection) draftListSection.classList.remove('hidden');
+        if (draftActionsSection) draftActionsSection.classList.remove('hidden');
+        if (progressTracker) progressTracker.classList.add('hidden');
         if (sendBtn) sendBtn.disabled = false;
     }
+}
+
+/**
+ * Start monitoring for replies and update progress bars
+ */
+function startReplyMonitoring(totalSent, updateProgressCallback) {
+    if (!AuthService.isSignedIn()) return;
+    
+    const repliesReceivedCount = document.getElementById('replies-received-count');
+    const repliesReceivedProgress = document.getElementById('replies-received-progress');
+    const repliesSortedCount = document.getElementById('replies-sorted-count');
+    const repliesSortedProgress = document.getElementById('replies-sorted-progress');
+    
+    // Helper to check if email is an undeliverable/bounceback
+    const isUndeliverable = (email) => {
+        const subject = (email.subject || '').toLowerCase();
+        const from = (email.from?.emailAddress?.address || '').toLowerCase();
+        const fromName = (email.from?.emailAddress?.name || '').toLowerCase();
+        
+        // Check for common bounceback indicators
+        if (subject.includes('undeliverable') || 
+            subject.includes('delivery failure') ||
+            subject.includes('delivery has failed') ||
+            subject.includes('mail delivery failed') ||
+            from.includes('postmaster') ||
+            from.includes('mailer-daemon') ||
+            from.includes('noreply') && subject.includes('failed') ||
+            fromName.includes('postmaster') ||
+            fromName.includes('mailer-daemon')) {
+            return true;
+        }
+        return false;
+    };
+    
+    // Helper to check if email is a real supplier reply
+    const isSupplierReply = (email) => {
+        const subject = (email.subject || '').toLowerCase();
+        // Must contain RFQ in subject and not be undeliverable
+        return subject.includes('rfq') && !isUndeliverable(email);
+    };
+    
+    let checkInterval = setInterval(async () => {
+        try {
+            let repliesReceived = 0;
+            let repliesSorted = 0;
+            const allReplyIds = new Set(); // Track unique reply IDs
+            
+            // Step 1: Get all mail folders to find Quotes and Clarification folders
+            let quoteFolders = [];
+            let clarificationFolders = [];
+            
+            try {
+                const allFolders = await AuthService.graphRequest(
+                    `/me/mailFolders?$select=id,displayName,parentFolderId&$top=500`
+                );
+                
+                if (allFolders.value) {
+                    for (const folder of allFolders.value) {
+                        const folderName = (folder.displayName || '').toLowerCase();
+                        if (folderName.includes('quote') && !folderName.includes('sent')) {
+                            quoteFolders.push(folder.id);
+                        }
+                        if (folderName.includes('clarification') && !folderName.includes('awaiting')) {
+                            clarificationFolders.push(folder.id);
+                        }
+                    }
+                }
+            } catch (e) {
+                console.warn('Error getting folders:', e);
+            }
+            
+            // Step 2: Count emails in sorted folders (Quotes and Clarifications)
+            for (const folderId of quoteFolders) {
+                try {
+                    const folderEmails = await AuthService.graphRequest(
+                        `/me/mailFolders/${folderId}/messages?$select=id,subject,from&$top=100`
+                    );
+                    if (folderEmails.value) {
+                        for (const email of folderEmails.value) {
+                            if (isSupplierReply(email) && !allReplyIds.has(email.id)) {
+                                allReplyIds.add(email.id);
+                                repliesReceived++;
+                                repliesSorted++;
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.warn(`Error counting emails in quote folder ${folderId}:`, e);
+                }
+            }
+            
+            for (const folderId of clarificationFolders) {
+                try {
+                    const folderEmails = await AuthService.graphRequest(
+                        `/me/mailFolders/${folderId}/messages?$select=id,subject,from&$top=100`
+                    );
+                    if (folderEmails.value) {
+                        for (const email of folderEmails.value) {
+                            if (isSupplierReply(email) && !allReplyIds.has(email.id)) {
+                                allReplyIds.add(email.id);
+                                repliesReceived++;
+                                repliesSorted++;
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.warn(`Error counting emails in clarification folder ${folderId}:`, e);
+                }
+            }
+            
+            // Step 3: Count RFQ-related emails in inbox (not yet sorted)
+            try {
+                const inboxReplies = await AuthService.graphRequest(
+                    `/me/mailFolders/inbox/messages?$filter=contains(subject,'RFQ')&$top=100&$select=id,subject,from&$orderby=receivedDateTime desc`
+                );
+                
+                if (inboxReplies.value) {
+                    for (const email of inboxReplies.value) {
+                        if (isSupplierReply(email) && !allReplyIds.has(email.id)) {
+                            allReplyIds.add(email.id);
+                            repliesReceived++;
+                            // Not sorted yet, so don't increment repliesSorted
+                        }
+                    }
+                }
+            } catch (e) {
+                console.warn('Error getting inbox replies:', e);
+            }
+            
+            console.log(`Reply monitoring: ${repliesReceived} received, ${repliesSorted} sorted out of ${totalSent} sent`);
+            
+            // Update UI
+            if (repliesReceivedCount) repliesReceivedCount.textContent = `${repliesReceived} / ${totalSent}`;
+            if (repliesReceivedProgress && totalSent > 0) {
+                repliesReceivedProgress.style.width = `${Math.min(100, (repliesReceived / totalSent) * 100)}%`;
+            }
+            
+            if (repliesSortedCount) repliesSortedCount.textContent = `${repliesSorted} / ${repliesReceived}`;
+            if (repliesSortedProgress && repliesReceived > 0) {
+                repliesSortedProgress.style.width = `${Math.min(100, (repliesSorted / repliesReceived) * 100)}%`;
+            } else if (repliesSortedProgress && repliesReceived === 0) {
+                repliesSortedProgress.style.width = '0%';
+            }
+            
+            // Stop monitoring if all replies are sorted
+            if (repliesReceived >= totalSent && repliesSorted >= repliesReceived) {
+                console.log('All replies received and sorted - stopping monitoring');
+                clearInterval(checkInterval);
+            }
+            
+        } catch (error) {
+            console.warn('Error monitoring replies:', error);
+        }
+    }, 5000); // Check every 5 seconds
+    
+    // Stop after 10 minutes (give more time for replies)
+    setTimeout(() => {
+        clearInterval(checkInterval);
+        console.log('Reply monitoring stopped after timeout');
+    }, 10 * 60 * 1000);
 }
 
 /**
@@ -1319,11 +2310,11 @@ async function sendDraftEmailWithFullWorkflow(draft) {
                     internetMessageId: internetMessageId,
                     material: materialCode || 'Unknown Material',
                     replyType: 'random',
-                    delaySeconds: 30,
+                    delaySeconds: 5,
                     quantity: quantity
                 });
                 
-                console.log(`✓ Auto-reply scheduled (will arrive in ~30 seconds)`);
+                console.log(`✓ Auto-reply scheduled (will arrive in ~5 seconds)`);
                 autoReplyScheduled = true;
             } else {
                 console.warn('Could not get user email for auto-reply scheduling');
@@ -1375,27 +2366,64 @@ async function handleSendToEngineer() {
         return;
     }
     
+    if (!AuthService.isSignedIn()) {
+        Helpers.showError('Please sign in to send emails');
+        return;
+    }
+    
+    const email = AppState.emailContext.email;
+    
+    // CRITICAL: Check if email is from Microsoft Outlook and delete immediately
+    if (EmailOperations.isFromMicrosoftOutlook(email)) {
+        try {
+            Helpers.showLoading('Deleting Microsoft Outlook email...');
+            if (email.id) {
+                await EmailOperations.deleteEmail(email.id);
+            }
+            Helpers.showSuccess('Microsoft Outlook email deleted');
+            Helpers.hideLoading();
+            return;
+        } catch (deleteError) {
+            Helpers.showError('Failed to delete Microsoft Outlook email: ' + deleteError.message);
+            Helpers.hideLoading();
+            return;
+        }
+    }
+    
     try {
         Helpers.showLoading('Forwarding to engineering...');
-        
-        const email = AppState.emailContext.email;
         const engineeringEmail = Config.getSetting(Config.STORAGE_KEYS.ENGINEERING_EMAIL, 'engineering@company.com');
         
-        // Create forward draft
-        const subject = `[Engineering Review] ${email.subject}`;
-        const body = `
+        // Format HTML comment with questions
+        let comment = `
             <p>Please review the following technical clarification request:</p>
             <hr>
             <p><strong>Original Email:</strong></p>
-            <p><strong>From:</strong> ${email.from?.emailAddress?.address}</p>
-            <p><strong>Subject:</strong> ${email.subject}</p>
+            <p><strong>From:</strong> ${email.from?.emailAddress?.address || 'Unknown'}</p>
+            <p><strong>Subject:</strong> ${email.subject || 'No subject'}</p>
             <hr>
-            ${email.body?.content || ''}
         `;
         
-        await EmailOperations.createDraft(engineeringEmail, subject, body);
+        // Add parsed questions if available
+        if (AppState.questions && AppState.questions.length > 0) {
+            comment += `<p><strong>Questions:</strong></p><ol>`;
+            AppState.questions.forEach((q, index) => {
+                comment += `<li><strong>${Helpers.escapeHtml(q.question)}</strong>`;
+                if (q.category && q.category !== 'General Questions') {
+                    comment += ` <em>(${Helpers.escapeHtml(q.category)})</em>`;
+                }
+                comment += `</li>`;
+            });
+            comment += `</ol><hr>`;
+        }
         
-        // Move original email to Awaiting Engineer folder
+        // Add original email body
+        comment += `<p><strong>Original Email Body:</strong></p>${email.body?.content || 'No body content'}`;
+        
+        // Forward email directly (no compose window)
+        await EmailOperations.forwardEmail(email.id, [engineeringEmail], comment);
+        
+        // Move original email to Awaiting Engineer folder after successful send
         const materialMatch = email.subject?.match(/MAT-\d+/i);
         if (materialMatch) {
             const folderPath = `${materialMatch[0]}/${Config.FOLDERS.AWAITING_ENGINEER}`;
@@ -1403,10 +2431,11 @@ async function handleSendToEngineer() {
                 await FolderManagement.moveEmailToFolder(email.id, folderPath);
             } catch (e) {
                 console.error('Could not move email to folder:', e);
+                // Don't fail the operation - email was sent successfully
             }
         }
         
-        Helpers.showSuccess('Forwarded to engineering team');
+        Helpers.showSuccess('Email forwarded to engineering team');
         
         // Go back to workflow
         showRFQWorkflowMode();
@@ -1419,6 +2448,45 @@ async function handleSendToEngineer() {
 }
 
 /**
+ * Format clarification response with all questions and answers
+ * @param {Array} questions - Array of question objects with responses
+ * @param {Object} email - Email context
+ * @returns {string} Formatted HTML response
+ */
+function formatClarificationResponse(questions, email) {
+    const supplierName = email.from?.emailAddress?.name || 'Supplier';
+    const supplierEmail = email.from?.emailAddress?.address || '';
+    
+    let html = `
+        <p>Dear ${Helpers.escapeHtml(supplierName)},</p>
+        <p>Thank you for your questions. Please find our responses below:</p>
+        <br>
+    `;
+    
+    questions.forEach((q, index) => {
+        const questionNum = index + 1;
+        const response = q.useCustomResponse && q.customResponse.trim() 
+            ? q.customResponse.trim() 
+            : (q.aiResponse || 'Response pending');
+        
+        html += `
+            <div style="margin-bottom: 16px;">
+                <p><strong>Q${questionNum}:</strong> ${Helpers.escapeHtml(q.question)}</p>
+                <p><strong>A${questionNum}:</strong> ${Helpers.escapeHtml(response)}</p>
+            </div>
+        `;
+    });
+    
+    html += `
+        <br>
+        <p>If you have any further questions, please don't hesitate to reach out.</p>
+        <p>Best regards,<br>Procurement Team</p>
+    `;
+    
+    return html;
+}
+
+/**
  * Handle replying to supplier with clarification response
  */
 async function handleReplyToSupplier() {
@@ -1427,25 +2495,94 @@ async function handleReplyToSupplier() {
         return;
     }
     
-    const responseText = document.getElementById('clarification-response-text')?.value;
-    if (!responseText || responseText.trim().length === 0) {
-        Helpers.showError('Please enter a response');
+    if (!AuthService.isSignedIn()) {
+        Helpers.showError('Please sign in to send emails');
+        return;
+    }
+    
+    const email = AppState.emailContext.email;
+    
+    // CRITICAL: Check if email is from Microsoft Outlook and delete immediately
+    if (EmailOperations.isFromMicrosoftOutlook(email)) {
+        try {
+            Helpers.showLoading('Deleting Microsoft Outlook email...');
+            if (email.id) {
+                await EmailOperations.deleteEmail(email.id);
+            }
+            Helpers.showSuccess('Microsoft Outlook email deleted');
+            Helpers.hideLoading();
+            return;
+        } catch (deleteError) {
+            Helpers.showError('Failed to delete Microsoft Outlook email: ' + deleteError.message);
+            Helpers.hideLoading();
+            return;
+        }
+    }
+    
+    // Check if we have questions with responses
+    if (!AppState.questions || AppState.questions.length === 0) {
+        // Fallback to old textarea method (but still send directly)
+        const responseText = document.getElementById('clarification-response-text')?.value;
+        if (!responseText || responseText.trim().length === 0) {
+            Helpers.showError('Please enter a response or wait for questions to be parsed');
+            return;
+        }
+        
+        try {
+            Helpers.showLoading('Sending reply...');
+            
+            const email = AppState.emailContext.email;
+            const htmlBody = EmailOperations.formatTextAsHtml(responseText);
+            
+            // Reply directly (no compose window)
+            await EmailOperations.replyToEmail(email.id, htmlBody, false);
+            
+            // Move original email to Awaiting Clarification Response folder
+            const materialMatch = email.subject?.match(/MAT-\d+/i);
+            if (materialMatch) {
+                const folderPath = `${materialMatch[0]}/${Config.FOLDERS.AWAITING_CLARIFICATION}`;
+                try {
+                    await FolderManagement.moveEmailToFolder(email.id, folderPath);
+                } catch (e) {
+                    console.error('Could not move email to folder:', e);
+                }
+            }
+            
+            Helpers.showSuccess('Reply sent to supplier');
+            showRFQWorkflowMode();
+        } catch (error) {
+            Helpers.showError('Failed to send reply: ' + error.message);
+        } finally {
+            Helpers.hideLoading();
+        }
+        return;
+    }
+    
+    // Validate that all questions have responses
+    const questionsWithoutResponses = AppState.questions.filter(q => {
+        const hasResponse = q.useCustomResponse 
+            ? q.customResponse.trim().length > 0
+            : (q.aiResponse && q.aiResponse.trim().length > 0);
+        return !hasResponse;
+    });
+    
+    if (questionsWithoutResponses.length > 0) {
+        Helpers.showError(`Please provide responses for all questions. ${questionsWithoutResponses.length} question(s) still need responses.`);
         return;
     }
     
     try {
-        Helpers.showLoading('Creating reply...');
+        Helpers.showLoading('Sending reply...');
         
         const email = AppState.emailContext.email;
-        const supplierEmail = email.from?.emailAddress?.address;
         
-        // Create reply
-        const subject = email.subject.startsWith('RE:') ? email.subject : `RE: ${email.subject}`;
-        const htmlBody = EmailOperations.formatTextAsHtml(responseText);
+        // Format response with all Q&A
+        const htmlBody = formatClarificationResponse(AppState.questions, email);
         
-        await EmailOperations.createDraft(supplierEmail, subject, htmlBody);
+        // Reply directly (no compose window)
+        await EmailOperations.replyToEmail(email.id, htmlBody, false);
         
-        // Move original email to Awaiting Clarification Response folder
+        // Move original email to Awaiting Clarification Response folder after successful send
         const materialMatch = email.subject?.match(/MAT-\d+/i);
         if (materialMatch) {
             const folderPath = `${materialMatch[0]}/${Config.FOLDERS.AWAITING_CLARIFICATION}`;
@@ -1453,16 +2590,17 @@ async function handleReplyToSupplier() {
                 await FolderManagement.moveEmailToFolder(email.id, folderPath);
             } catch (e) {
                 console.error('Could not move email to folder:', e);
+                // Don't fail the operation - email was sent successfully
             }
         }
         
-        Helpers.showSuccess('Reply draft created');
+        Helpers.showSuccess('Reply sent to supplier with all Q&A');
         
         // Go back to workflow
         showRFQWorkflowMode();
         
     } catch (error) {
-        Helpers.showError('Failed to create reply: ' + error.message);
+        Helpers.showError('Failed to send reply: ' + error.message);
     } finally {
         Helpers.hideLoading();
     }
@@ -1539,7 +2677,6 @@ async function initializeApp() {
         registerItemChangedHandler();
         
         // Restore persisted state (shows success message if we were sending)
-        // Note: This only shows messages, we ALWAYS detect context afterwards
         try {
             restorePersistedState();
         } catch (e) {
@@ -1547,9 +2684,8 @@ async function initializeApp() {
         }
         
         // ALWAYS detect email context and render appropriate UI
-        // Even if we showed a success message, we need to detect what email we're on
-        // CRITICAL: Wrap context detection in its own try-catch
-        // so the add-in always shows something
+        // Draft mode only shows when viewing a draft email
+        // Normal/workflow mode shows for everything else
         try {
             console.log('Detecting email context...');
             const context = await detectEmailContext();
@@ -1608,17 +2744,20 @@ function setupModeEventListeners() {
     
     // Draft mode buttons
     document.getElementById('send-all-drafts-btn')?.addEventListener('click', handleSendAllDraftsFromDraftMode);
+    document.getElementById('refresh-progress-btn')?.addEventListener('click', async () => {
+        const state = getPersistedState();
+        await loadRfqProgress(state);
+        Helpers.showSuccess('Progress refreshed');
+    });
     
     // Clarification mode buttons
     document.getElementById('send-to-engineer-btn')?.addEventListener('click', handleSendToEngineer);
     document.getElementById('reply-to-supplier-btn')?.addEventListener('click', handleReplyToSupplier);
     
     // Quote mode buttons
-    document.getElementById('compare-quotes-btn')?.addEventListener('click', () => {
-        // Switch to quote comparison tab
-        showRFQWorkflowMode();
-        const quoteTab = document.querySelector('[data-tab="quote-comparison"]');
-        if (quoteTab) quoteTab.click();
+    document.getElementById('compare-quotes-btn')?.addEventListener('click', async () => {
+        // Show quote comparison view and automatically load all quotes
+        await showQuoteComparisonView();
     });
     document.getElementById('accept-quote-btn')?.addEventListener('click', handleAcceptQuote);
 }
@@ -1665,7 +2804,7 @@ async function onItemChanged(eventArgs) {
         showRFQWorkflowMode();
     }
     
-    // If in workflow mode, also update email processing tab info
+    // If in workflow mode, update email info if email processing is visible
     if (AppState.currentMode === 'rfq-workflow') {
         const emailProcessingTab = document.getElementById('email-processing-tab');
         if (emailProcessingTab && !emailProcessingTab.classList.contains('hidden')) {
@@ -1747,9 +2886,7 @@ function setupEventListeners() {
     document.getElementById('sign-out-btn')?.addEventListener('click', handleSignOut);
 
     // Navigation tabs
-    document.querySelectorAll('.nav-tab').forEach(tab => {
-        tab.addEventListener('click', handleTabClick);
-    });
+    // Tab navigation removed - using context-based mode switching only
 
     // Refresh button
     document.getElementById('refresh-btn')?.addEventListener('click', handleRefresh);
@@ -1781,7 +2918,9 @@ function setupEventListeners() {
     document.getElementById('create-engineer-draft-btn')?.addEventListener('click', handleCreateEngineerDraft);
 
     // Quote comparison
-    document.getElementById('rfq-select')?.addEventListener('change', handleRFQSelect);
+    document.getElementById('refresh-quotes-btn')?.addEventListener('click', () => {
+        loadAllQuotesFromFolder();
+    });
 
     // RFQ Preview Modal
     document.getElementById('close-rfq-preview')?.addEventListener('click', closeRFQPreviewModal);
@@ -1828,35 +2967,7 @@ function dismissPinReminder() {
 }
 
 // ==================== TAB NAVIGATION ====================
-function handleTabClick(event) {
-    const clickedTab = event.currentTarget;
-    const tabName = clickedTab.dataset.tab;
-    
-    // Update tab buttons
-    document.querySelectorAll('.nav-tab').forEach(tab => {
-        tab.classList.remove('active');
-    });
-    clickedTab.classList.add('active');
-    
-    // Update tab content
-    document.querySelectorAll('.tab-content').forEach(content => {
-        content.classList.remove('active');
-        Helpers.hideElement(content);
-    });
-    
-    const targetContent = document.getElementById(`${tabName}-tab`);
-    if (targetContent) {
-        targetContent.classList.add('active');
-        Helpers.showElement(targetContent);
-    }
-    
-    // Load data for specific tabs
-    if (tabName === 'email-processing') {
-        loadCurrentEmailInfo();
-    } else if (tabName === 'quote-comparison') {
-        loadAvailableRFQs();
-    }
-}
+// Tab navigation removed - using context-based mode switching only
 
 // ==================== DATA LOADING ====================
 async function loadInitialData() {
@@ -1983,6 +3094,18 @@ async function handlePRSelect(pr) {
     
     AppState.selectedPR = pr;
     
+    // Clear RFQs when a new PR is selected (allows generating RFQs for new PR)
+    AppState.rfqs = [];
+    
+    // Remove success message if it exists
+    const successMsg = document.querySelector('.rfq-generated-message');
+    if (successMsg) {
+        successMsg.remove();
+    }
+    
+    // Reset button state
+    updateGenerateRFQsButton();
+    
     // Persist the selection
     persistState({ 
         selectedPR: pr,
@@ -2107,10 +3230,42 @@ function handleSelectAllSuppliers(event) {
 function updateGenerateRFQsButton() {
     const btn = document.getElementById('generate-rfqs-btn');
     if (btn) {
-        btn.disabled = AppState.selectedSuppliers.length === 0;
-        btn.textContent = AppState.selectedSuppliers.length > 0
-            ? `Generate RFQs (${AppState.selectedSuppliers.length})`
-            : 'Generate RFQs';
+        // Reset button if RFQs haven't been generated yet or if suppliers changed
+        const hasGeneratedRFQs = AppState.rfqs && AppState.rfqs.length > 0;
+        
+        if (!hasGeneratedRFQs) {
+            // Reset button to normal state
+            btn.disabled = AppState.selectedSuppliers.length === 0;
+            btn.classList.remove('ms-Button--default');
+            btn.classList.add('ms-Button--primary');
+            const btnLabel = btn.querySelector('.ms-Button-label');
+            if (btnLabel) {
+                btnLabel.textContent = AppState.selectedSuppliers.length > 0
+                    ? `Generate RFQs (${AppState.selectedSuppliers.length})`
+                    : 'Generate RFQs';
+            } else {
+                btn.textContent = AppState.selectedSuppliers.length > 0
+                    ? `Generate RFQs (${AppState.selectedSuppliers.length})`
+                    : 'Generate RFQs';
+            }
+            
+            // Remove success message if it exists
+            const successMsg = document.querySelector('.rfq-generated-message');
+            if (successMsg) {
+                successMsg.remove();
+            }
+        } else {
+            // Keep button in "Generated" state
+            btn.disabled = true;
+            btn.classList.remove('ms-Button--primary');
+            btn.classList.add('ms-Button--default');
+            const btnLabel = btn.querySelector('.ms-Button-label');
+            if (btnLabel) {
+                btnLabel.textContent = 'Generated';
+            } else {
+                btn.textContent = 'Generated';
+            }
+        }
     }
 }
 
@@ -2167,11 +3322,69 @@ async function handleGenerateRFQs() {
         
         AppState.rfqs = rfqs;
         
-        // Enable review step
-        Helpers.enableStep(document.getElementById('step-review-rfqs'));
+        // Update the Generate RFQs button to show "Generated" and disable it
+        const generateBtn = document.getElementById('generate-rfqs-btn');
+        if (generateBtn) {
+            generateBtn.disabled = true;
+            generateBtn.classList.remove('ms-Button--primary');
+            generateBtn.classList.add('ms-Button--default');
+            const btnLabel = generateBtn.querySelector('.ms-Button-label');
+            if (btnLabel) {
+                btnLabel.textContent = 'Generated';
+            } else {
+                generateBtn.textContent = 'Generated';
+            }
+        }
         
-        // Render RFQ cards
-        renderRFQCards(rfqs);
+        // Clear the RFQ list container and show success message
+        const container = document.getElementById('rfq-list');
+        if (container) {
+            container.innerHTML = `
+                <div style="text-align: center; padding: 40px 20px; color: #107c10;">
+                    <div style="font-size: 48px; margin-bottom: 16px;">✓</div>
+                    <div style="font-size: 18px; font-weight: 600; margin-bottom: 8px;">RFQs Generated</div>
+                    <div style="font-size: 14px; color: #605e5c; margin-bottom: 16px;">${rfqs.length} RFQ draft(s) have been created and saved to your Drafts folder.</div>
+                    <div style="font-size: 13px; color: #0078d4; font-weight: 500;">Check your Drafts folder in Outlook to review and send them.</div>
+                </div>
+            `;
+        }
+        
+        // Add success message above the button
+        const stepContent = document.querySelector('#step-select-suppliers .step-content');
+        if (stepContent) {
+            // Check if success message already exists, remove it first
+            const existingMsg = stepContent.querySelector('.rfq-generated-message');
+            if (existingMsg) {
+                existingMsg.remove();
+            }
+            
+            // Create new success message
+            const successMsg = document.createElement('div');
+            successMsg.className = 'rfq-generated-message';
+            successMsg.style.cssText = 'background-color: #deecf9; border: 1px solid #0078d4; border-radius: 4px; padding: 12px 16px; margin-bottom: 16px; color: #004578;';
+            successMsg.innerHTML = `
+                <div style="display: flex; align-items: flex-start; gap: 10px;">
+                    <span style="font-size: 20px; color: #107c10; flex-shrink: 0;">✓</span>
+                    <div style="flex: 1;">
+                        <div style="font-weight: 600; margin-bottom: 4px; font-size: 14px;">RFQs Generated Successfully</div>
+                        <div style="font-size: 13px; line-height: 1.4;">${rfqs.length} RFQ draft(s) have been created and saved to your <strong>Drafts folder</strong> in Outlook.</div>
+                    </div>
+                </div>
+            `;
+            
+            // Insert before the button
+            const generateBtn = document.getElementById('generate-rfqs-btn');
+            if (generateBtn && generateBtn.parentNode) {
+                generateBtn.parentNode.insertBefore(successMsg, generateBtn);
+            }
+        }
+        
+        // Disable review step (hide it)
+        const reviewStep = document.getElementById('step-review-rfqs');
+        if (reviewStep) {
+            reviewStep.classList.add('disabled');
+            reviewStep.style.display = 'none';
+        }
         
         Helpers.showSuccess(`${rfqs.length} RFQ(s) generated successfully`);
     } catch (error) {
@@ -2521,7 +3734,7 @@ async function handleSendAllRFQs() {
                                 internetMessageId: sendResult.internetMessageId,
                                 material: materialName,
                                 replyType: 'random',
-                                delaySeconds: 30,
+                                delaySeconds: 5,
                                 quantity: quantity
                             });
                             console.log(`✓ Auto-reply scheduled for ${rfq.supplier_name}:`, replyResult);
@@ -2557,7 +3770,7 @@ async function handleSendAllRFQs() {
         renderRFQCards(AppState.rfqs);
 
         if (failCount === 0) {
-            Helpers.showSuccess(`All ${successCount} RFQ(s) sent successfully. Replies will arrive in ~30 seconds.`);
+            Helpers.showSuccess(`All ${successCount} RFQ(s) sent successfully. Replies will arrive in ~5 seconds.`);
         } else {
             Helpers.showError(`${successCount} sent, ${failCount} failed`);
         }
@@ -2595,6 +3808,26 @@ async function handleClassifyEmail() {
     if (!AppState.currentEmail) {
         Helpers.showError('No email selected');
         return;
+    }
+    
+    // CRITICAL: Check if email is from Microsoft Outlook and delete immediately
+    const email = AppState.currentEmail;
+    if (EmailOperations.isFromMicrosoftOutlook(email)) {
+        try {
+            Helpers.showLoading('Deleting Microsoft Outlook email...');
+            if (email.id) {
+                await EmailOperations.deleteEmail(email.id);
+            }
+            Helpers.showSuccess('Microsoft Outlook email deleted');
+            Helpers.hideLoading();
+            // Clear current email state
+            AppState.currentEmail = null;
+            return;
+        } catch (deleteError) {
+            Helpers.showError('Failed to delete Microsoft Outlook email: ' + deleteError.message);
+            Helpers.hideLoading();
+            return;
+        }
     }
     
     try {
@@ -2849,6 +4082,532 @@ async function loadAvailableRFQs() {
     });
 }
 
+/**
+ * Show quote comparison view and automatically load all quotes
+ */
+async function showQuoteComparisonView() {
+    // Hide all modes
+    hideAllModes();
+    
+    // Show quote comparison section
+    const mainContent = document.getElementById('main-content');
+    const quoteComparisonTab = document.getElementById('quote-comparison-tab');
+    
+    if (quoteComparisonTab && mainContent) {
+        // Hide other tab sections
+        document.querySelectorAll('.tab-content').forEach(tab => {
+            tab.classList.remove('active');
+            tab.classList.add('hidden');
+        });
+        
+        // Show quote comparison
+        quoteComparisonTab.classList.remove('hidden');
+        quoteComparisonTab.classList.add('active');
+        mainContent.style.display = 'block';
+        
+        // Automatically load all quotes
+        await loadAllQuotesFromFolder();
+    }
+}
+
+/**
+ * Get material code from current email's folder context
+ * Checks if email is in a Quotes folder under a material folder (MAT-XXXXX/Quotes)
+ */
+async function getMaterialCodeFromEmailContext() {
+    try {
+        // Try to get current email from Office.js context first
+        let currentEmailId = null;
+        try {
+            if (Office.context.mailbox && Office.context.mailbox.item && Office.context.mailbox.item.itemId) {
+                currentEmailId = Office.context.mailbox.item.itemId;
+            }
+        } catch (e) {
+            // Office.js not available, try AppState
+            if (AppState.currentEmail && AppState.currentEmail.id) {
+                currentEmailId = AppState.currentEmail.id;
+            }
+        }
+        
+        if (!currentEmailId || !AuthService.isSignedIn()) {
+            return null;
+        }
+        
+        // Get email with folder information
+        const emailRequest = AuthService.graphRequest(
+            `/me/messages/${currentEmailId}?$select=id,parentFolderId`
+        );
+        const email = await Helpers.withTimeout(
+            emailRequest,
+            5000,
+            'Timeout getting email folder info'
+        );
+        
+        if (!email.parentFolderId) {
+            return null;
+        }
+        
+        // Get the current folder (should be Quotes if we're in the right place)
+        const currentFolderRequest = AuthService.graphRequest(
+            `/me/mailFolders/${email.parentFolderId}?$select=id,displayName,parentFolderId`
+        );
+        const currentFolder = await Helpers.withTimeout(
+            currentFolderRequest,
+            5000,
+            'Timeout getting current folder info'
+        );
+        
+        if (!currentFolder) {
+            return null;
+        }
+        
+        // Check if we're in a Quotes folder
+        if (currentFolder.displayName && currentFolder.displayName.toLowerCase() === 'quotes') {
+            // Get the parent folder (should be the material folder MAT-XXXXX)
+            if (currentFolder.parentFolderId) {
+                const parentFolderRequest = AuthService.graphRequest(
+                    `/me/mailFolders/${currentFolder.parentFolderId}?$select=id,displayName`
+                );
+                const parentFolder = await Helpers.withTimeout(
+                    parentFolderRequest,
+                    5000,
+                    'Timeout getting parent folder info'
+                );
+                
+                if (parentFolder && parentFolder.displayName && /^MAT-\d+$/i.test(parentFolder.displayName)) {
+                    return parentFolder.displayName.toUpperCase();
+                }
+            }
+        }
+        
+        // If not in Quotes folder, walk up the tree to find material folder
+        let currentFolderId = email.parentFolderId;
+        const maxDepth = 5;
+        let depth = 0;
+        
+        while (currentFolderId && depth < maxDepth) {
+            const folderRequest = AuthService.graphRequest(
+                `/me/mailFolders/${currentFolderId}?$select=id,displayName,parentFolderId`
+            );
+            const folder = await Helpers.withTimeout(
+                folderRequest,
+                3000,
+                'Timeout walking folder tree'
+            );
+            
+            if (!folder) break;
+            
+            // Check if this is a material folder (MAT-XXXXX)
+            if (folder.displayName && /^MAT-\d+$/i.test(folder.displayName)) {
+                return folder.displayName.toUpperCase();
+            }
+            
+            // Move up to parent folder
+            if (!folder.parentFolderId || folder.parentFolderId === 'msgfolderroot') {
+                break;
+            }
+            currentFolderId = folder.parentFolderId;
+            depth++;
+        }
+        
+        return null;
+    } catch (error) {
+        console.error('Error getting material code from email context:', error);
+        return null;
+    }
+}
+
+/**
+ * Load all quotes from the Quotes folder for the current material
+ * Automatically detects material code from email's folder context
+ */
+async function loadAllQuotesFromFolder() {
+    const container = document.getElementById('quotes-container');
+    if (!container) return;
+    
+    try {
+        Helpers.showLoading('Loading quotes from folders...');
+        container.innerHTML = '<div class="loading-indicator"><div class="spinner-small"></div><span>Detecting material from email context...</span></div>';
+        
+        if (!AuthService.isSignedIn()) {
+            container.innerHTML = '<p class="placeholder-text">Please sign in to view quotes</p>';
+            Helpers.hideLoading();
+            return;
+        }
+        
+        // Try to get material code from email's folder context first
+        let materialCode = await getMaterialCodeFromEmailContext();
+        
+        // Fallback: Get material code from selected PR if available
+        if (!materialCode && AppState.selectedPR) {
+            materialCode = Helpers.extractMaterialCode(AppState.selectedPR);
+        }
+        
+        // Fallback: Try to extract from email subject
+        if (!materialCode) {
+            try {
+                if (Office.context.mailbox && Office.context.mailbox.item) {
+                    const subject = Office.context.mailbox.item.subject || '';
+                    const match = subject.match(/MAT-\d+/i);
+                    if (match) {
+                        materialCode = match[0].toUpperCase();
+                    }
+                }
+            } catch (e) {
+                // Office.js not available
+            }
+        }
+        
+        if (!materialCode) {
+            container.innerHTML = '<p class="placeholder-text">Unable to detect material code. Please open an email from a Quotes folder or select a Purchase Requisition.</p>';
+            Helpers.hideLoading();
+            return;
+        }
+        
+        // Find the Quotes folder for this specific material (MAT-XXXXX/Quotes)
+        container.innerHTML = `<div class="loading-indicator"><div class="spinner-small"></div><span>Finding Quotes folder for ${materialCode}...</span></div>`;
+        const quotesFolder = await findMaterialQuotesFolder(materialCode);
+        
+        if (!quotesFolder) {
+            container.innerHTML = `<p class="placeholder-text">No Quotes folder found for ${materialCode}. Quotes will appear here once suppliers respond.</p>`;
+            Helpers.hideLoading();
+            return;
+        }
+        
+        // Get all emails from the Quotes folder for this material
+        container.innerHTML = `<div class="loading-indicator"><div class="spinner-small"></div><span>Loading emails from Quotes folder...</span></div>`;
+        let allEmails = [];
+        try {
+            allEmails = await getEmailsByFolderId(quotesFolder.id, {
+                top: 100,
+                select: ['id', 'subject', 'from', 'body', 'receivedDateTime'],
+                orderBy: 'receivedDateTime desc'
+            });
+        } catch (error) {
+            console.error(`Error getting emails from Quotes folder for ${materialCode}:`, error);
+            container.innerHTML = `<p class="placeholder-text">Error loading emails: ${Helpers.escapeHtml(error.message)}</p>`;
+            Helpers.hideLoading();
+            return;
+        }
+        
+        if (allEmails.length === 0) {
+            container.innerHTML = '<p class="placeholder-text">No quotes found in Quotes folders</p>';
+            Helpers.hideLoading();
+            return;
+        }
+        
+        // Extract quote information from emails in batches (5 at a time)
+        container.innerHTML = `<div class="loading-indicator"><div class="spinner-small"></div><span>Extracting quote data from ${allEmails.length} email(s)...</span></div>`;
+        const quotes = [];
+        const batchSize = 5;
+        
+        for (let i = 0; i < allEmails.length; i += batchSize) {
+            const batch = allEmails.slice(i, i + batchSize);
+            const batchNumber = Math.floor(i / batchSize) + 1;
+            const totalBatches = Math.ceil(allEmails.length / batchSize);
+            
+            // Update progress
+            if (allEmails.length > batchSize) {
+                container.innerHTML = `<div class="loading-indicator"><div class="spinner-small"></div><span>Processing batch ${batchNumber} of ${totalBatches} (${i + 1}-${Math.min(i + batchSize, allEmails.length)} of ${allEmails.length})...</span></div>`;
+            }
+            
+            // Process batch in parallel
+            const batchPromises = batch.map(async (email) => {
+                try {
+                    const quote = await extractQuoteFromEmail(email);
+                    return quote;
+                } catch (error) {
+                    console.error(`Error extracting quote from email ${email.id}:`, error);
+                    // Return minimal quote info instead of failing
+                    return {
+                        supplier_name: email.from?.emailAddress?.name || email.from?.emailAddress?.address || 'Unknown',
+                        supplier_email: email.from?.emailAddress?.address || '',
+                        price: null,
+                        unit_price: null,
+                        total_price: null,
+                        lead_time: null,
+                        delivery_time: null,
+                        validity: null,
+                        payment_terms: null,
+                        quote_date: email.receivedDateTime,
+                        status: 'Received',
+                        currency: 'USD',
+                        email_id: email.id,
+                        email_subject: email.subject
+                    };
+                }
+            });
+            
+            const batchResults = await Promise.all(batchPromises);
+            batchResults.forEach(quote => {
+                if (quote) {
+                    quotes.push(quote);
+                }
+            });
+        }
+        
+        // Render comparison table
+        renderQuoteComparison(quotes);
+        Helpers.hideLoading();
+        
+    } catch (error) {
+        console.error('Error loading quotes:', error);
+        container.innerHTML = '<p class="placeholder-text">Error loading quotes: ' + Helpers.escapeHtml(error.message) + '</p>';
+        Helpers.hideLoading();
+    }
+}
+
+/**
+ * Find the Quotes folder for a specific material (e.g., MAT-12345/Quotes)
+ * Returns folder ID directly (no path resolution needed)
+ * @param {string} materialCode - The material code (e.g., "MAT-12345")
+ * @returns {Promise<Object|null>} Folder object with {id, name} or null if not found
+ */
+async function findMaterialQuotesFolder(materialCode) {
+    try {
+        // Get all mail folders with timeout
+        const folderRequest = AuthService.graphRequest('/me/mailFolders?$top=500');
+        const response = await Helpers.withTimeout(
+            folderRequest,
+            5000,
+            'Timeout while fetching folders'
+        );
+        const allFolders = response.value || [];
+        
+        // Find the material folder (MAT-XXXXX)
+        const materialFolder = allFolders.find(folder => 
+            folder.displayName && folder.displayName.toUpperCase() === materialCode.toUpperCase()
+        );
+        
+        if (!materialFolder) {
+            console.log(`Material folder ${materialCode} not found`);
+            return null;
+        }
+        
+        // Get child folders of the material folder
+        try {
+            const childrenRequest = AuthService.graphRequest(
+                `/me/mailFolders/${materialFolder.id}/childFolders?$top=100`
+            );
+            const children = await Helpers.withTimeout(
+                childrenRequest,
+                5000,
+                `Timeout checking child folders of ${materialCode}`
+            );
+            
+            if (children.value) {
+                // Find the Quotes folder
+                const quotesFolder = children.value.find(child =>
+                    child.displayName && child.displayName.toLowerCase() === 'quotes'
+                );
+                
+                if (quotesFolder) {
+                    return {
+                        id: quotesFolder.id,
+                        name: quotesFolder.displayName
+                    };
+                }
+            }
+        } catch (error) {
+            console.error(`Error getting child folders for ${materialCode}:`, error);
+            return null;
+        }
+        
+        return null;
+    } catch (error) {
+        console.error('Error finding Quotes folder:', error);
+        return null;
+    }
+}
+
+/**
+ * Get emails directly from a folder by ID (no path conversion needed)
+ * @param {string} folderId - The folder ID
+ * @param {Object} options - Options for fetching emails
+ * @returns {Promise<Array>} Array of email objects
+ */
+async function getEmailsByFolderId(folderId, options = {}) {
+    try {
+        let endpoint = `/me/mailFolders/${folderId}/messages`;
+        const params = [];
+
+        if (options.top) {
+            params.push(`$top=${options.top}`);
+        }
+        if (options.select) {
+            params.push(`$select=${options.select.join(',')}`);
+        }
+        if (options.orderBy) {
+            params.push(`$orderby=${options.orderBy}`);
+        }
+
+        if (params.length > 0) {
+            endpoint += '?' + params.join('&');
+        }
+
+        const emailRequest = AuthService.graphRequest(endpoint);
+        const response = await Helpers.withTimeout(
+            emailRequest,
+            10000,
+            `Timeout fetching emails from folder ${folderId}`
+        );
+        
+        return response.value || [];
+    } catch (error) {
+        console.error(`Error getting emails from folder ${folderId}:`, error);
+        return [];
+    }
+}
+
+/**
+ * Extract quote information from an email
+ * Optimized to only fetch body if missing, with timeout protection
+ */
+async function extractQuoteFromEmail(email) {
+    try {
+        // Get full email body if not already available (with timeout)
+        let emailBody = email.body?.content || '';
+        if (!emailBody && email.id) {
+            try {
+                const emailRequest = EmailOperations.getEmailById(email.id);
+                const fullEmail = await Helpers.withTimeout(
+                    emailRequest,
+                    5000,
+                    `Timeout fetching email body for ${email.id}`
+                );
+                emailBody = fullEmail.body?.content || '';
+            } catch (error) {
+                console.warn(`Could not fetch full email body for ${email.id}:`, error.message);
+                // Continue with empty body - extraction will work with what we have
+                emailBody = '';
+            }
+        }
+        
+        const bodyText = Helpers.stripHtml(emailBody);
+        const supplierName = email.from?.emailAddress?.name || email.from?.emailAddress?.address || 'Unknown';
+        const supplierEmail = email.from?.emailAddress?.address || '';
+        
+        // Try to extract quote data using patterns
+        const quote = {
+            supplier_name: supplierName,
+            supplier_email: supplierEmail,
+            email_id: email.id,
+            email_subject: email.subject,
+            quote_date: email.receivedDateTime,
+            status: 'Received',
+            currency: 'USD'
+        };
+        
+        // Extract prices
+        // Pattern: $X.XX, USD X.XX, Price: X, Unit Price: X, Total: X
+        const pricePatterns = [
+            /\$[\d,]+\.?\d*/g,
+            /USD\s*[\d,]+\.?\d*/gi,
+            /(?:unit\s*)?price[:\s]*\$?[\d,]+\.?\d*/gi,
+            /total[:\s]*\$?[\d,]+\.?\d*/gi,
+            /[\d,]+\.?\d*\s*(?:USD|dollars?)/gi
+        ];
+        
+        let prices = [];
+        for (const pattern of pricePatterns) {
+            const matches = bodyText.match(pattern);
+            if (matches) {
+                prices.push(...matches);
+            }
+        }
+        
+        // Extract numeric values from prices
+        const numericPrices = prices.map(p => {
+            const num = parseFloat(p.replace(/[^0-9.]/g, ''));
+            return isNaN(num) ? null : num;
+        }).filter(p => p !== null && p > 0);
+        
+        // Try to identify unit price vs total price from context
+        const unitPriceMatch = bodyText.match(/(?:unit\s*price|price\s*per\s*unit)[:\s]*\$?([\d,]+\.?\d*)/i);
+        const totalPriceMatch = bodyText.match(/(?:total\s*price|total\s*amount|grand\s*total)[:\s]*\$?([\d,]+\.?\d*)/i);
+        
+        if (unitPriceMatch) {
+            quote.unit_price = parseFloat(unitPriceMatch[1].replace(/[^0-9.]/g, ''));
+        }
+        if (totalPriceMatch) {
+            quote.total_price = parseFloat(totalPriceMatch[1].replace(/[^0-9.]/g, ''));
+        }
+        
+        // If we found prices but didn't identify unit/total, make educated guesses
+        if (numericPrices.length > 0) {
+            if (!quote.unit_price && !quote.total_price) {
+                // If multiple prices, assume largest is total, smallest is unit
+                if (numericPrices.length > 1) {
+                    quote.total_price = Math.max(...numericPrices);
+                    quote.unit_price = Math.min(...numericPrices);
+                } else {
+                    // Single price - could be either, assume it's total
+                    quote.total_price = numericPrices[0];
+                    quote.unit_price = numericPrices[0];
+                }
+            } else if (!quote.total_price && quote.unit_price) {
+                // Have unit price, try to find total
+                quote.total_price = numericPrices.find(p => p > quote.unit_price) || quote.unit_price;
+            } else if (!quote.unit_price && quote.total_price) {
+                // Have total price, try to find unit
+                quote.unit_price = numericPrices.find(p => p < quote.total_price) || quote.total_price;
+            }
+            quote.price = quote.total_price || quote.unit_price || numericPrices[0];
+        }
+        
+        // Extract lead time / delivery time
+        const leadTimePatterns = [
+            /(?:lead\s*time|delivery\s*time)[:\s]*(\d+\s*(?:weeks?|days?|months?))/gi,
+            /(\d+\s*(?:weeks?|days?|months?))\s*(?:lead|delivery)/gi,
+            /delivery[:\s]*(\d+\s*(?:weeks?|days?|months?))/gi
+        ];
+        
+        for (const pattern of leadTimePatterns) {
+            const match = bodyText.match(pattern);
+            if (match && match[1]) {
+                quote.lead_time = match[1].trim();
+                quote.delivery_time = match[1].trim();
+                break;
+            }
+        }
+        
+        // Extract validity
+        const validityPatterns = [
+            /valid(?:ity)?[:\s]*(?:for\s*)?(\d+\s*(?:days?|weeks?|months?))/gi,
+            /valid\s*(?:for|until)[:\s]*(\d+\s*(?:days?|weeks?|months?))/gi,
+            /expires?\s*(?:in|on)[:\s]*(\d+\s*(?:days?|weeks?|months?))/gi
+        ];
+        
+        for (const pattern of validityPatterns) {
+            const match = bodyText.match(pattern);
+            if (match && match[1]) {
+                quote.validity = match[1].trim();
+                break;
+            }
+        }
+        
+        // Extract payment terms
+        const paymentPatterns = [
+            /payment\s*terms?[:\s]*(net\s*\d+|[\w\s]+)/gi,
+            /net\s*\d+/gi,
+            /terms?[:\s]*(net\s*\d+|[\w\s]+)/gi
+        ];
+        
+        for (const pattern of paymentPatterns) {
+            const match = bodyText.match(pattern);
+            if (match && match[1] || match[0]) {
+                quote.payment_terms = (match[1] || match[0]).trim();
+                break;
+            }
+        }
+        
+        return quote;
+    } catch (error) {
+        console.error('Error extracting quote from email:', error);
+        return null;
+    }
+}
+
 async function handleRFQSelect(event) {
     const rfqId = event.target.value;
     
@@ -2877,53 +4636,200 @@ function renderQuoteComparison(quotes) {
     Helpers.clearChildren(container);
     
     if (quotes.length === 0) {
-        container.innerHTML = '<p class="placeholder-text">No quotes received yet</p>';
+        container.innerHTML = '<p class="placeholder-text">No quotes found in Quotes folders</p>';
         Helpers.hideElement(document.getElementById('quote-summary'));
         return;
     }
     
-    quotes.forEach(quote => {
-        const card = Helpers.createElement('div', {
-            className: 'quote-card'
-        }, `
-            <div class="quote-card-header">
-                <h4>${Helpers.escapeHtml(quote.supplier_name)}</h4>
-            </div>
-            <div class="quote-card-body">
-                <div class="quote-field">
-                    <label>Price</label>
-                    <span class="value price">${Helpers.formatCurrency(quote.price, quote.currency)}</span>
-                </div>
-                <div class="quote-field">
-                    <label>Delivery</label>
-                    <span class="value">${Helpers.escapeHtml(quote.delivery_time || 'N/A')}</span>
-                </div>
-                <div class="quote-field">
-                    <label>Quote Date</label>
-                    <span class="value">${Helpers.formatDate(quote.quote_date)}</span>
-                </div>
-                <div class="quote-field">
-                    <label>Status</label>
-                    <span class="value">${quote.status}</span>
-                </div>
-            </div>
-        `);
+    // Calculate best prices and statistics (only from quotes with valid prices)
+    const prices = quotes
+        .map(q => {
+            // Try unit_price first, then total_price, then price
+            const unitPrice = q.unit_price ? parseFloat(q.unit_price) : null;
+            const totalPrice = q.total_price ? parseFloat(q.total_price) : null;
+            const price = q.price ? parseFloat(q.price) : null;
+            
+            // Prefer unit price for comparison, fallback to total or price
+            const comparisonPrice = unitPrice || totalPrice || price;
+            return comparisonPrice && comparisonPrice > 0 ? comparisonPrice : null;
+        })
+        .filter(p => p !== null && p > 0);
+    
+    const lowestPrice = prices.length > 0 ? Math.min(...prices) : null;
+    const highestPrice = prices.length > 0 ? Math.max(...prices) : null;
+    const averagePrice = prices.length > 0 ? prices.reduce((a, b) => a + b, 0) / prices.length : null;
+    
+    // Find fastest delivery (assuming delivery_time is in a comparable format)
+    const quotesWithDelivery = quotes.filter(q => q.delivery_time);
+    const fastestDelivery = quotesWithDelivery.length > 0 
+        ? quotesWithDelivery.reduce((fastest, current) => {
+            // Simple comparison - in production, parse delivery times properly
+            return current;
+        }, quotesWithDelivery[0])
+        : null;
+    
+    // Create comparison table
+    const tableWrapper = document.createElement('div');
+    tableWrapper.className = 'quote-comparison-table-wrapper';
+    
+    const table = document.createElement('table');
+    table.className = 'comparison-table';
+    
+    // Table header
+    const thead = document.createElement('thead');
+    thead.className = 'comparison-header';
+    thead.innerHTML = `
+        <tr>
+            <th>Supplier</th>
+            <th>Unit Price</th>
+            <th>Total Price</th>
+            <th>Lead Time</th>
+            <th>Validity</th>
+            <th>Payment Terms</th>
+            <th>Quote Date</th>
+            <th>Status</th>
+        </tr>
+    `;
+    
+    // Calculate lowest prices for highlighting (before creating rows)
+    const unitPrices = quotes
+        .map(q => {
+            const up = parseFloat(q.unit_price) || parseFloat(q.total_price) || parseFloat(q.price) || 0;
+            return up > 0 ? up : null;
+        })
+        .filter(p => p !== null && p > 0);
+    const totalPrices = quotes
+        .map(q => {
+            const tp = parseFloat(q.total_price) || parseFloat(q.price) || 0;
+            return tp > 0 ? tp : null;
+        })
+        .filter(p => p !== null && p > 0);
+    
+    const lowestUnitPrice = unitPrices.length > 0 ? Math.min(...unitPrices) : null;
+    const lowestTotalPrice = totalPrices.length > 0 ? Math.min(...totalPrices) : null;
+    
+    // Table body
+    const tbody = document.createElement('tbody');
+    
+    quotes.forEach((quote, index) => {
+        const row = document.createElement('tr');
+        row.className = 'comparison-row';
+        if (index % 2 === 0) {
+            row.classList.add('even-row');
+        }
         
-        container.appendChild(card);
+        // Handle quotes with minimal information gracefully
+        const unitPrice = quote.unit_price ? parseFloat(quote.unit_price) : null;
+        const totalPrice = quote.total_price ? parseFloat(quote.total_price) : null;
+        const price = quote.price ? parseFloat(quote.price) : null;
+        
+        // For comparison, use numeric values
+        const unitPriceNum = unitPrice !== null && !isNaN(unitPrice) ? unitPrice : (totalPrice !== null && !isNaN(totalPrice) ? totalPrice : (price !== null && !isNaN(price) ? price : 0));
+        const totalPriceNum = totalPrice !== null && !isNaN(totalPrice) ? totalPrice : (price !== null && !isNaN(price) ? price : (unitPrice !== null && !isNaN(unitPrice) ? unitPrice : 0));
+        
+        // Check if this is the lowest
+        const isLowestUnit = unitPriceNum > 0 && lowestUnitPrice !== null && unitPriceNum === lowestUnitPrice;
+        const isLowestTotal = totalPriceNum > 0 && lowestTotalPrice !== null && totalPriceNum === lowestTotalPrice;
+        
+        row.innerHTML = `
+            <td class="comparison-cell supplier-cell">
+                <strong>${Helpers.escapeHtml(quote.supplier_name || 'Unknown')}</strong>
+            </td>
+            <td class="comparison-cell price-cell ${isLowestUnit ? 'best-price' : ''}">
+                ${unitPriceNum > 0 ? `
+                    <span class="price-value">${Helpers.formatCurrency(unitPriceNum, quote.currency || 'USD')}</span>
+                    ${isLowestUnit ? '<span class="price-badge">Best</span>' : ''}
+                ` : '<span class="no-data">-</span>'}
+            </td>
+            <td class="comparison-cell price-cell ${isLowestTotal ? 'best-price' : ''}">
+                ${totalPriceNum > 0 ? `
+                    <span class="price-value">${Helpers.formatCurrency(totalPriceNum, quote.currency || 'USD')}</span>
+                    ${isLowestTotal ? '<span class="price-badge">Best</span>' : ''}
+                ` : '<span class="no-data">-</span>'}
+            </td>
+            <td class="comparison-cell">
+                ${quote.lead_time || quote.delivery_time || '<span class="no-data">-</span>'}
+            </td>
+            <td class="comparison-cell">
+                ${quote.validity || quote.validity_period || '<span class="no-data">-</span>'}
+            </td>
+            <td class="comparison-cell">
+                ${quote.payment_terms || '<span class="no-data">-</span>'}
+            </td>
+            <td class="comparison-cell">
+                ${quote.quote_date ? Helpers.formatDate(quote.quote_date) : '<span class="no-data">-</span>'}
+            </td>
+            <td class="comparison-cell status-cell">
+                <span class="quote-status-badge ${(quote.status || '').toLowerCase().replace(/\s+/g, '-')}">
+                    ${Helpers.escapeHtml(quote.status || 'Pending')}
+                </span>
+            </td>
+        `;
+        
+        tbody.appendChild(row);
     });
     
-    // Show summary
-    if (quotes.length > 1) {
-        const lowest = Helpers.sortBy(quotes, 'price')[0];
-        const summaryContainer = document.getElementById('summary-content');
+    table.appendChild(thead);
+    table.appendChild(tbody);
+    tableWrapper.appendChild(table);
+    container.appendChild(tableWrapper);
+    
+    // Enhanced summary
+    const summaryContainer = document.getElementById('summary-content');
+    const summarySection = document.getElementById('quote-summary');
+    
+    if (quotes.length > 0) {
         if (summaryContainer) {
+            const lowestQuote = quotes.find(q => {
+                const price = parseFloat(q.unit_price) || parseFloat(q.total_price) || parseFloat(q.price) || 0;
+                return price > 0 && price === lowestPrice;
+            }) || quotes[0];
+            
             summaryContainer.innerHTML = `
-                <p><strong>Lowest Price:</strong> ${Helpers.formatCurrency(lowest.price, lowest.currency)} 
-                   from ${Helpers.escapeHtml(lowest.supplier_name)}</p>
-                <p><strong>Total Quotes:</strong> ${quotes.length}</p>
+                <div class="summary-card">
+                    <div class="summary-label">Lowest Price</div>
+                    <div class="summary-value highlight">
+                        ${lowestPrice ? Helpers.formatCurrency(lowestPrice, lowestQuote.currency || 'USD') : 'N/A'}
+                    </div>
+                    <div class="summary-subtext">${Helpers.escapeHtml(lowestQuote.supplier_name || '')}</div>
+                </div>
+                ${averagePrice ? `
+                <div class="summary-card">
+                    <div class="summary-label">Average Price</div>
+                    <div class="summary-value">
+                        ${Helpers.formatCurrency(averagePrice, lowestQuote.currency || 'USD')}
+                    </div>
+                </div>
+                ` : ''}
+                ${lowestPrice && highestPrice ? `
+                <div class="summary-card">
+                    <div class="summary-label">Price Range</div>
+                    <div class="summary-value">
+                        ${Helpers.formatCurrency(lowestPrice, lowestQuote.currency || 'USD')} - 
+                        ${Helpers.formatCurrency(highestPrice, lowestQuote.currency || 'USD')}
+                    </div>
+                </div>
+                ` : ''}
+                <div class="summary-card">
+                    <div class="summary-label">Total Quotes</div>
+                    <div class="summary-value">${quotes.length}</div>
+                </div>
+                ${fastestDelivery ? `
+                <div class="summary-card">
+                    <div class="summary-label">Fastest Delivery</div>
+                    <div class="summary-value">${Helpers.escapeHtml(fastestDelivery.delivery_time || fastestDelivery.lead_time || 'N/A')}</div>
+                    <div class="summary-subtext">${Helpers.escapeHtml(fastestDelivery.supplier_name || '')}</div>
+                </div>
+                ` : ''}
             `;
         }
-        Helpers.showElement(document.getElementById('quote-summary'));
+        if (summarySection) {
+            Helpers.showElement(summarySection);
+        }
+    } else {
+        if (summarySection) {
+            Helpers.hideElement(summarySection);
+        }
     }
 }
 

@@ -37,6 +37,12 @@ const Config = {
     // Request timeout in milliseconds
     REQUEST_TIMEOUT: 30000,
 
+    // OpenAI API Configuration
+    // SECURITY WARNING: API key is exposed in frontend code
+    // In production, this should be moved to backend to prevent key exposure
+    OPENAI_API_KEY: 'REMOVED_SECRET',
+    OPENAI_API_BASE_URL: 'https://api.openai.com/v1',
+
     // Load settings from local storage
     loadSettings() {
         try {

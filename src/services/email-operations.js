@@ -647,6 +647,32 @@ const EmailOperations = {
     },
 
     /**
+     * Delete an email by ID
+     * @param {string} emailId - The ID of the email to delete
+     */
+    async deleteEmail(emailId) {
+        if (!AuthService.isSignedIn()) {
+            throw new Error('Please sign in to delete emails');
+        }
+
+        if (!emailId) {
+            throw new Error('Email ID is required');
+        }
+
+        try {
+            console.log(`Deleting email: ${emailId}`);
+            await AuthService.graphRequest(`/me/messages/${emailId}`, {
+                method: 'DELETE'
+            });
+            console.log(`✓ Successfully deleted email: ${emailId}`);
+            return { status: 'deleted' };
+        } catch (error) {
+            console.error('Failed to delete email:', error);
+            throw error;
+        }
+    },
+
+    /**
      * Delete a draft by ID
      * @param {string} draftId - The ID of the draft to delete
      */
@@ -671,6 +697,49 @@ const EmailOperations = {
             // Don't throw - draft deletion failure shouldn't fail the send operation
             return { status: 'delete_failed', error: error.message };
         }
+    },
+
+    /**
+     * Check if an email is from Microsoft Outlook
+     * @param {Object} email - Email object with from field
+     * @returns {boolean} True if email is from Microsoft Outlook
+     */
+    isFromMicrosoftOutlook(email) {
+        if (!email || !email.from) {
+            return false;
+        }
+
+        const fromAddress = (email.from?.emailAddress?.address || '').toLowerCase();
+        const fromName = (email.from?.emailAddress?.name || '').toLowerCase();
+
+        // Check email domain
+        const microsoftDomains = [
+            '@microsoft.com',
+            '@outlook.com',
+            '@office.com',
+            '@office365.com',
+            '@microsoftonline.com'
+        ];
+
+        const isMicrosoftDomain = microsoftDomains.some(domain => 
+            fromAddress.includes(domain)
+        );
+
+        // Check sender name for Microsoft Outlook indicators
+        const microsoftNamePatterns = [
+            'microsoft outlook',
+            'microsoft office',
+            'outlook',
+            'office 365',
+            'microsoft',
+            'exchange online'
+        ];
+
+        const isMicrosoftName = microsoftNamePatterns.some(pattern => 
+            fromName.includes(pattern)
+        );
+
+        return isMicrosoftDomain || isMicrosoftName;
     },
 
     /**

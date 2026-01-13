@@ -145,6 +145,24 @@ const EmailMonitor = {
                 this.log(`  From: ${email.from?.emailAddress?.address || 'unknown'}`);
                 this.log(`  ID: ${email.id}`);
 
+                // CRITICAL: Check if email is from Microsoft Outlook and delete immediately
+                if (EmailOperations.isFromMicrosoftOutlook(email)) {
+                    this.log('⚠️  DETECTED Microsoft Outlook email - DELETING immediately');
+                    try {
+                        await EmailOperations.deleteEmail(email.id);
+                        this.logSuccess(`✓ Deleted Microsoft Outlook email: ${email.id}`);
+                        this.processedEmails.add(email.id);
+                        skippedCount++;
+                        continue; // Skip all further processing
+                    } catch (deleteError) {
+                        this.logError('Failed to delete Microsoft Outlook email:', deleteError.message);
+                        // Continue to mark as processed so we don't keep trying
+                        this.processedEmails.add(email.id);
+                        skippedCount++;
+                        continue;
+                    }
+                }
+
                 // Check if this is a reply to an email with SENT RFQ category
                 const isReplyToSentRfq = await this.isReplyToSentRfq(email);
                 
@@ -441,12 +459,39 @@ const EmailMonitor = {
         this.log('========================================');
         
         try {
+            // Step 0: CRITICAL - Check if email is from Microsoft Outlook and delete immediately
+            this.log('Step 0: Checking for Microsoft Outlook emails...');
+            if (EmailOperations.isFromMicrosoftOutlook(email)) {
+                this.log('⚠️  DETECTED Microsoft Outlook email - DELETING immediately');
+                try {
+                    await EmailOperations.deleteEmail(email.id);
+                    this.logSuccess(`✓ Deleted Microsoft Outlook email: ${email.id}`);
+                    return; // Stop all processing
+                } catch (deleteError) {
+                    this.logError('Failed to delete Microsoft Outlook email:', deleteError.message);
+                    throw deleteError; // Fail the processing
+                }
+            }
+
             // Step 1: Get full email details with body content
             this.log('Step 1: Fetching full email details...');
             const fullEmail = await AuthService.graphRequest(
                 `/me/messages/${email.id}?$select=id,subject,from,body,receivedDateTime,conversationId`
             );
             this.logSuccess(`Got email from: ${fullEmail.from?.emailAddress?.address || 'unknown'}`);
+            
+            // Double-check after getting full email (in case from field wasn't complete)
+            if (EmailOperations.isFromMicrosoftOutlook(fullEmail)) {
+                this.log('⚠️  DETECTED Microsoft Outlook email (after full fetch) - DELETING immediately');
+                try {
+                    await EmailOperations.deleteEmail(email.id);
+                    this.logSuccess(`✓ Deleted Microsoft Outlook email: ${email.id}`);
+                    return; // Stop all processing
+                } catch (deleteError) {
+                    this.logError('Failed to delete Microsoft Outlook email:', deleteError.message);
+                    throw deleteError; // Fail the processing
+                }
+            }
             
             // Step 2: Get email chain for classification
             this.log('Step 2: Building email chain for classification...');
@@ -492,6 +537,28 @@ const EmailMonitor = {
                     supplierId  // Add required supplier_id parameter
                 );
                 this.logSuccess(`Classification result: ${classification.classification} (confidence: ${classification.confidence})`);
+                
+                // Store the backend email_id for future API calls
+                // This mapping is used when user opens the email later
+                if (classification.email_id) {
+                    this.log(`  Storing backend email_id: ${classification.email_id}`);
+                    // Use the storeEmailId function from taskpane.js if available
+                    if (typeof storeEmailId === 'function') {
+                        storeEmailId(email.id, classification.email_id);
+                    } else {
+                        // Fallback: store directly in localStorage
+                        try {
+                            const mapping = JSON.parse(localStorage.getItem('procurement_email_id_mapping') || '{}');
+                            mapping[email.id] = classification.email_id;
+                            localStorage.setItem('procurement_email_id_mapping', JSON.stringify(mapping));
+                            this.log(`  Backend email_id stored in localStorage`);
+                        } catch (storageError) {
+                            this.logError('Failed to store email_id:', storageError.message);
+                        }
+                    }
+                } else {
+                    this.log(`  Warning: No email_id returned from classification API`);
+                }
             } catch (classifyError) {
                 this.logError('Classification API failed:', classifyError.message);
                 this.logError('Full error:', classifyError);
