@@ -380,6 +380,18 @@ main {
     color: #323130;
 }
 
+.draft-summary-card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.draft-summary-item {
+    font-size: 14px;
+    color: #323130;
+    line-height: 1.5;
+}
+
 .pending-drafts-list {
     max-height: 200px;
     overflow-y: auto;
@@ -426,13 +438,17 @@ main {
 }
 
 .draft-actions {
-    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
     margin-top: 20px;
 }
 
 .draft-actions .ms-Button--large {
     padding: 12px 24px !important;
     font-size: 16px !important;
+    width: 100%;
 }
 
 .warning-text {

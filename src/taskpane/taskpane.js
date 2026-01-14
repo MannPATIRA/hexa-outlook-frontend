@@ -28,7 +28,9 @@ const AppState = {
     // Current email context details
     emailContext: null,
     // Parsed questions with AI responses
-    questions: []
+    questions: [],
+    // Pending RFQ drafts (for modal display)
+    pendingDrafts: []
 };
 
 // ==================== STATE PERSISTENCE ====================
@@ -872,24 +874,83 @@ async function showDraftMode(context) {
 }
 
 /**
+ * Extract summary data from drafts array
+ * @param {Array} drafts - Array of draft email objects
+ * @returns {Object} Summary object with count, material, quantity, supplierCount
+ */
+function extractDraftSummary(drafts) {
+    if (!drafts || drafts.length === 0) {
+        return { count: 0, material: null, quantity: null, supplierCount: 0 };
+    }
+
+    const materials = [];
+    const quantities = [];
+    const suppliers = new Set();
+
+    drafts.forEach(draft => {
+        const subject = draft.subject || '';
+        
+        // Extract material code
+        const materialMatch = subject.match(/MAT-\d+/i);
+        if (materialMatch) {
+            materials.push(materialMatch[0]);
+        }
+        
+        // Extract quantity (pattern: number followed by optional unit like "pcs", "units", etc.)
+        // Look for patterns like " - 100 pcs" or "100 pcs" (avoid matching material codes like MAT-12345)
+        const quantityMatch = subject.match(/[-–—]\s*(\d+)\s*(pcs|units|pieces)?/i) || subject.match(/\b(\d+)\s+(pcs|units|pieces)\b/i);
+        if (quantityMatch) {
+            quantities.push(quantityMatch[1] + (quantityMatch[2] ? ' ' + quantityMatch[2] : ''));
+        }
+        
+        // Count unique suppliers
+        const recipient = draft.toRecipients?.[0]?.emailAddress?.address;
+        if (recipient) {
+            suppliers.add(recipient);
+        }
+    });
+
+    // Find most common material
+    const materialCounts = {};
+    materials.forEach(m => materialCounts[m] = (materialCounts[m] || 0) + 1);
+    const mostCommonMaterial = Object.keys(materialCounts).reduce((a, b) => 
+        materialCounts[a] > materialCounts[b] ? a : b, materials[0] || null
+    );
+
+    // Find most common quantity
+    const quantityCounts = {};
+    quantities.forEach(q => quantityCounts[q] = (quantityCounts[q] || 0) + 1);
+    const mostCommonQuantity = Object.keys(quantityCounts).reduce((a, b) => 
+        quantityCounts[a] > quantityCounts[b] ? a : b, quantities[0] || null
+    );
+
+    return {
+        count: drafts.length,
+        material: mostCommonMaterial || null,
+        quantity: mostCommonQuantity || null,
+        supplierCount: suppliers.size
+    };
+}
+
+/**
  * Load and display pending RFQ drafts
  */
 async function loadPendingDrafts() {
-    const listContainer = document.getElementById('pending-drafts-list');
+    const summaryCard = document.getElementById('draft-summary-card');
     const draftActionsSection = document.getElementById('draft-actions-section');
     const sendStatus = document.getElementById('draft-send-status');
     const progressTracker = document.getElementById('rfq-progress-tracker');
     
-    if (!listContainer) return;
+    if (!summaryCard) return;
     
-    listContainer.innerHTML = '<p class="loading-text">Loading drafts...</p>';
+    summaryCard.innerHTML = '<p class="loading-text">Loading drafts...</p>';
     
     // Hide progress elements (those are for during/after sending)
     if (sendStatus) sendStatus.classList.add('hidden');
     if (progressTracker) progressTracker.classList.add('hidden');
     
     if (!AuthService.isSignedIn()) {
-        listContainer.innerHTML = '<p class="loading-text">Please sign in to view drafts</p>';
+        summaryCard.innerHTML = '<p class="loading-text">Please sign in to view drafts</p>';
         return;
     }
     
@@ -916,35 +977,95 @@ async function loadPendingDrafts() {
             } catch (simpleError) {
                 console.error('Both draft queries failed:', simpleError);
                 // Still show the send button - user is viewing a draft
-                listContainer.innerHTML = `
+                summaryCard.innerHTML = `
                     <div class="no-drafts-message">
                         <div class="icon"></div>
-                        <p>You're viewing an RFQ draft. Click "Send All RFQ Drafts" to send all pending drafts.</p>
+                        <p>You're viewing an RFQ draft. Click "Send all RFQs" to send all pending drafts.</p>
                     </div>
                 `;
                 if (draftActionsSection) draftActionsSection.classList.remove('hidden');
                 const sendBtn = document.getElementById('send-all-drafts-btn');
+                const viewDetailsBtn = document.getElementById('view-draft-details-btn');
                 if (sendBtn) sendBtn.disabled = false;
+                if (viewDetailsBtn) viewDetailsBtn.disabled = true;
+                AppState.pendingDrafts = [];
                 return;
             }
         }
         
         if (!drafts.value || drafts.value.length === 0) {
-            listContainer.innerHTML = `
+            summaryCard.innerHTML = `
                 <div class="no-drafts-message">
                     <div class="icon"></div>
                     <p>No RFQ drafts found. Generate RFQs in the workflow first.</p>
                 </div>
             `;
             if (draftActionsSection) draftActionsSection.classList.add('hidden');
+            AppState.pendingDrafts = [];
             return;
         }
+        
+        // Store drafts for modal access
+        AppState.pendingDrafts = drafts.value;
         
         // Show draft actions
         if (draftActionsSection) draftActionsSection.classList.remove('hidden');
         
-        // Render the drafts
-        listContainer.innerHTML = drafts.value.map(draft => {
+        // Extract summary data
+        const summary = extractDraftSummary(drafts.value);
+        
+        // Render summary card
+        let summaryHTML = `<div class="draft-summary-item">${summary.count} drafts prepared</div>`;
+        if (summary.material) {
+            summaryHTML += `<div class="draft-summary-item">Material ${Helpers.escapeHtml(summary.material)}</div>`;
+        }
+        if (summary.quantity) {
+            summaryHTML += `<div class="draft-summary-item">Quantity ${Helpers.escapeHtml(summary.quantity)}</div>`;
+        }
+        summaryHTML += `<div class="draft-summary-item">Suppliers ${summary.supplierCount}</div>`;
+        
+        summaryCard.innerHTML = summaryHTML;
+        
+        // Enable buttons
+        const sendBtn = document.getElementById('send-all-drafts-btn');
+        const viewDetailsBtn = document.getElementById('view-draft-details-btn');
+        if (sendBtn) sendBtn.disabled = false;
+        if (viewDetailsBtn) viewDetailsBtn.disabled = false;
+        
+    } catch (error) {
+        console.error('Error loading drafts:', error);
+        // Don't show error - just show a helpful message
+        summaryCard.innerHTML = `
+            <div class="no-drafts-message">
+                <div class="icon"></div>
+                <p>You're viewing an RFQ draft. Click "Send all RFQs" to send all pending drafts.</p>
+            </div>
+        `;
+        if (draftActionsSection) draftActionsSection.classList.remove('hidden');
+        const sendBtn = document.getElementById('send-all-drafts-btn');
+        const viewDetailsBtn = document.getElementById('view-draft-details-btn');
+        if (sendBtn) sendBtn.disabled = false;
+        if (viewDetailsBtn) viewDetailsBtn.disabled = true;
+        AppState.pendingDrafts = [];
+    }
+}
+
+/**
+ * Show draft details modal with full list of drafts
+ */
+function showDraftDetailsModal() {
+    const modal = document.getElementById('draft-details-modal');
+    const listContainer = document.getElementById('draft-details-list');
+    
+    if (!modal || !listContainer) return;
+    
+    const drafts = AppState.pendingDrafts || [];
+    
+    if (drafts.length === 0) {
+        listContainer.innerHTML = '<p class="placeholder-text">No drafts available</p>';
+    } else {
+        // Render the full draft list
+        listContainer.innerHTML = drafts.map(draft => {
             const recipient = draft.toRecipients?.[0]?.emailAddress?.name || 
                              draft.toRecipients?.[0]?.emailAddress?.address || 
                              'Unknown';
@@ -958,23 +1079,18 @@ async function loadPendingDrafts() {
                 </div>
             `;
         }).join('');
-        
-        // Enable send button
-        const sendBtn = document.getElementById('send-all-drafts-btn');
-        if (sendBtn) sendBtn.disabled = false;
-        
-    } catch (error) {
-        console.error('Error loading drafts:', error);
-        // Don't show error - just show a helpful message
-        listContainer.innerHTML = `
-            <div class="no-drafts-message">
-                <div class="icon"></div>
-                <p>You're viewing an RFQ draft. Click "Send All RFQ Drafts" to send all pending drafts.</p>
-            </div>
-        `;
-        if (draftActionsSection) draftActionsSection.classList.remove('hidden');
-        const sendBtn = document.getElementById('send-all-drafts-btn');
-        if (sendBtn) sendBtn.disabled = false;
+    }
+    
+    modal.classList.remove('hidden');
+}
+
+/**
+ * Close draft details modal
+ */
+function closeDraftDetailsModal() {
+    const modal = document.getElementById('draft-details-modal');
+    if (modal) {
+        modal.classList.add('hidden');
     }
 }
 
@@ -2921,6 +3037,8 @@ function setupModeEventListeners() {
     
     // Draft mode buttons
     document.getElementById('send-all-drafts-btn')?.addEventListener('click', handleSendAllDraftsFromDraftMode);
+    document.getElementById('view-draft-details-btn')?.addEventListener('click', showDraftDetailsModal);
+    document.getElementById('close-draft-details-modal')?.addEventListener('click', closeDraftDetailsModal);
     document.getElementById('refresh-progress-btn')?.addEventListener('click', async () => {
         const state = getPersistedState();
         await loadRfqProgress(state);
