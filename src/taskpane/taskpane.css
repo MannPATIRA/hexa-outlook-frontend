@@ -1780,3 +1780,433 @@ textarea.ms-TextField-field {
 ::-webkit-scrollbar-thumb:hover {
     background: #a19f9d;
 }
+
+/* ==================== QUOTE COMPARISON MODAL ==================== */
+
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.3);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 2000;
+    animation: fadeIn 0.15s ease;
+}
+
+.modal-overlay.hidden {
+    display: none;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+.quote-comparison-modal-container {
+    background-color: white;
+    border-radius: 4px;
+    width: 98%;
+    max-width: 1200px;
+    max-height: 96vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.14);
+    animation: slideUp 0.2s ease;
+    overflow: hidden;
+}
+
+@keyframes slideUp {
+    from {
+        transform: translateY(10px);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+.quote-comparison-modal-container .modal-header {
+    padding: 12px 16px;
+    border-bottom: 1px solid #edebe9;
+    background: white;
+    color: #323130;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.quote-comparison-modal-container .modal-header h2 {
+    font-size: 18px;
+    font-weight: 600;
+    margin: 0;
+    color: #323130;
+}
+
+.quote-comparison-modal-container .modal-header .ms-Button {
+    min-width: 32px;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    color: #605e5c;
+    background: transparent;
+    border: none;
+    border-radius: 2px;
+    transition: background-color 0.15s ease;
+}
+
+.quote-comparison-modal-container .modal-header .ms-Button:hover {
+    background-color: #f3f2f1;
+    color: #323130;
+}
+
+.quote-comparison-modal-container .modal-header .ms-Button-icon {
+    font-size: 16px;
+}
+
+.modal-toolbar {
+    padding: 10px 16px;
+    border-bottom: 1px solid #edebe9;
+    background-color: #faf9f8;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    flex-shrink: 0;
+}
+
+.toolbar-left {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex: 1;
+}
+
+.toolbar-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.search-filter-group {
+    min-width: 200px;
+}
+
+.search-filter-group input {
+    width: 100%;
+    padding: 6px 10px;
+    border: 1px solid #8a8886;
+    border-radius: 2px;
+    font-size: 13px;
+    transition: border-color 0.15s;
+}
+
+.search-filter-group input:focus {
+    outline: none;
+    border-color: #0078d4;
+    box-shadow: 0 0 0 1px rgba(0, 120, 212, 0.1);
+}
+
+.sort-filter-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.sort-filter-group label {
+    font-size: 12px;
+    font-weight: 500;
+    color: #605e5c;
+    white-space: nowrap;
+}
+
+.sort-filter-group select {
+    padding: 6px 10px;
+    border: 1px solid #8a8886;
+    border-radius: 2px;
+    font-size: 13px;
+    background-color: white;
+    cursor: pointer;
+    min-width: 160px;
+}
+
+.quick-filters {
+    display: flex;
+    gap: 8px;
+}
+
+.filter-btn {
+    padding: 5px 12px;
+    font-size: 12px;
+    border: 1px solid #8a8886;
+    background-color: white;
+    color: #323130;
+    border-radius: 2px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.filter-btn:hover {
+    background-color: #f3f2f1;
+    border-color: #0078d4;
+}
+
+.filter-btn.active {
+    background-color: #0078d4;
+    color: white;
+    border-color: #0078d4;
+}
+
+.export-group {
+    display: flex;
+    gap: 8px;
+}
+
+.quote-comparison-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+}
+
+.summary-cards-grid {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 20px;
+    padding: 12px 0;
+    border-bottom: 1px solid #f3f2f1;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+}
+
+.summary-card {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1;
+    min-width: 120px;
+}
+
+.summary-card-icon {
+    display: none;
+}
+
+.summary-card-content {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.summary-card-label {
+    font-size: 11px;
+    color: #605e5c;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    font-weight: 500;
+    line-height: 1.2;
+}
+
+.summary-card-value {
+    font-size: 16px;
+    font-weight: 600;
+    color: #323130;
+    line-height: 1.3;
+}
+
+.summary-card-subtext {
+    font-size: 11px;
+    color: #8a8886;
+    line-height: 1.2;
+    margin-top: 2px;
+}
+
+.card-total .summary-card-value {
+    color: #323130;
+}
+
+.card-best .summary-card-value {
+    color: #107c10;
+}
+
+.card-average .summary-card-value {
+    color: #323130;
+}
+
+.card-fastest .summary-card-value {
+    color: #0078d4;
+}
+
+.comparison-table-container {
+    background: white;
+    border-radius: 2px;
+    overflow: hidden;
+    border: 1px solid #edebe9;
+}
+
+.comparison-table-wrapper {
+    overflow-x: auto;
+}
+
+.quote-comparison-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.quote-comparison-table thead {
+    background: #faf9f8;
+    color: #323130;
+}
+
+.quote-comparison-table th {
+    padding: 10px 12px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+    border-bottom: 1px solid #edebe9;
+    color: #605e5c;
+}
+
+.quote-comparison-table tbody tr {
+    border-bottom: 1px solid #f3f2f1;
+    transition: background-color 0.1s;
+}
+
+.quote-comparison-table tbody tr:hover {
+    background-color: #faf9f8;
+}
+
+.quote-comparison-table tbody tr.even-row {
+    background-color: #faf9f8;
+}
+
+.quote-comparison-table tbody tr.even-row:hover {
+    background-color: #f3f2f1;
+}
+
+.quote-comparison-table td {
+    padding: 10px 12px;
+    vertical-align: middle;
+}
+
+.supplier-cell {
+    min-width: 180px;
+}
+
+.supplier-cell strong {
+    display: block;
+    color: #323130;
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.supplier-email {
+    font-size: 12px;
+    color: #8a8886;
+}
+
+.price-cell {
+    font-weight: 600;
+    min-width: 120px;
+}
+
+.price-cell.best-price {
+    background-color: #dff6dd;
+}
+
+.price-value {
+    color: #323130;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.best-badge {
+    display: inline-block;
+    background-color: #107c10;
+    color: white;
+    font-size: 9px;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 2px;
+    margin-left: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.delivery-cell {
+    min-width: 120px;
+}
+
+.delivery-cell.fastest-delivery {
+    background-color: #deecf9;
+}
+
+.fastest-badge {
+    display: inline-block;
+    background-color: #0078d4;
+    color: white;
+    font-size: 9px;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 2px;
+    margin-left: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.actions-cell {
+    text-align: center;
+    min-width: 100px;
+}
+
+.no-data {
+    color: #8a8886;
+    font-style: italic;
+}
+
+.quote-comparison-modal-container .modal-footer {
+    padding: 10px 16px;
+    border-top: 1px solid #edebe9;
+    background-color: white;
+    flex-shrink: 0;
+}
+
+.modal-footer-left {
+    display: flex;
+    align-items: center;
+}
+
+.quote-count-text {
+    font-size: 14px;
+    color: #605e5c;
+    font-weight: 500;
+}
+
+.empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: #8a8886;
+}
+
+.empty-state p {
+    font-size: 16px;
+}
+
+.error-message {
+    color: #d13438;
+    padding: 20px;
+    text-align: center;
+}
