@@ -61,6 +61,75 @@ function copyDir(src, dest) {
     }
 }
 
+// Create index.html for root access
+const indexHtmlContent = `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Outlook Procurement Add-in</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            max-width: 800px;
+            margin: 100px auto;
+            padding: 20px;
+            line-height: 1.6;
+            color: #333;
+        }
+        h1 {
+            color: #0078d4;
+        }
+        .info-box {
+            background: #f3f2f1;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+        .status {
+            display: inline-block;
+            padding: 4px 12px;
+            background: #107c10;
+            color: white;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: bold;
+        }
+        code {
+            background: #f3f2f1;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+        }
+    </style>
+</head>
+<body>
+    <h1>Outlook Procurement Workflow Add-in</h1>
+    
+    <div class="info-box">
+        <p><span class="status">✓ DEPLOYED</span></p>
+        <p>This is the deployment server for the Outlook Procurement Add-in.</p>
+    </div>
+
+    <h2>Add-in Information</h2>
+    <ul>
+        <li><strong>Main Taskpane:</strong> <a href="/src/taskpane/taskpane.html">/src/taskpane/taskpane.html</a></li>
+        <li><strong>Manifest:</strong> <a href="/manifest.xml">/manifest.xml</a></li>
+    </ul>
+
+    <h2>How to Use</h2>
+    <p>This add-in is designed to be loaded within Microsoft Outlook. To use it:</p>
+    <ol>
+        <li>Download the <code>manifest.xml</code> file</li>
+        <li>In Outlook, go to <strong>Get Add-ins</strong> → <strong>My add-ins</strong> → <strong>Add a custom add-in</strong></li>
+        <li>Select the manifest.xml file</li>
+        <li>The manifest should point to this deployment URL</li>
+    </ol>
+
+    <p><em>Note: The manifest.xml file needs to be updated with this deployment URL instead of localhost.</em></p>
+</body>
+</html>`;
+
 // Copy all necessary files and directories to public
 const filesToCopy = [
     'src',
@@ -81,6 +150,10 @@ for (const item of filesToCopy) {
         }
     }
 }
+
+// Create index.html in public directory
+const indexHtmlPath = path.join(publicDir, 'index.html');
+fs.writeFileSync(indexHtmlPath, indexHtmlContent, 'utf8');
 
 console.log('✅ Build complete: Environment variables injected');
 console.log('✅ Files copied to public directory for Vercel');
