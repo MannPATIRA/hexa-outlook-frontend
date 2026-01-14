@@ -888,6 +888,9 @@ main {
 }
 
 .list-item-title {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
     font-weight: 600;
     margin-bottom: 4px;
 }
@@ -941,27 +944,9 @@ main {
 
 /* ==================== MATCH SCORE BADGE ==================== */
 .match-score {
-    display: inline-block;
-    padding: 2px 8px;
-    border-radius: 12px;
     font-size: 12px;
     font-weight: 600;
-    margin-left: 8px;
-}
-
-.match-score.high {
-    background-color: #dff6dd;
-    color: #107c10;
-}
-
-.match-score.medium {
-    background-color: #fff4ce;
-    color: #797775;
-}
-
-.match-score.low {
-    background-color: #f3f2f1;
-    color: #605e5c;
+    color: #323130;
 }
 
 /* ==================== SELECTED ITEM INFO ==================== */

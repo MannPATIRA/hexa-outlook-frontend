@@ -293,12 +293,11 @@ function restorePersistedState() {
     }
     
     // Restore workflow state if recent (within last hour)
+    // Don't restore selectedPR - let user select manually on page load
     const oneHourAgo = Date.now() - (60 * 60 * 1000);
     if (state.timestamp && state.timestamp > oneHourAgo) {
-        if (state.selectedPR) {
-            AppState.selectedPR = state.selectedPR;
-            console.log('Restored selected PR:', state.selectedPR);
-        }
+        // Skip restoring selectedPR to prevent auto-selection
+        // AppState.selectedPR remains null until user explicitly selects one
         if (state.rfqs && state.rfqs.length > 0) {
             AppState.rfqs = state.rfqs;
             console.log('Restored RFQs:', state.rfqs.length);
@@ -919,7 +918,7 @@ async function loadPendingDrafts() {
                 // Still show the send button - user is viewing a draft
                 listContainer.innerHTML = `
                     <div class="no-drafts-message">
-                        <div class="icon">📝</div>
+                        <div class="icon"></div>
                         <p>You're viewing an RFQ draft. Click "Send All RFQ Drafts" to send all pending drafts.</p>
                     </div>
                 `;
@@ -933,7 +932,7 @@ async function loadPendingDrafts() {
         if (!drafts.value || drafts.value.length === 0) {
             listContainer.innerHTML = `
                 <div class="no-drafts-message">
-                    <div class="icon">📋</div>
+                    <div class="icon"></div>
                     <p>No RFQ drafts found. Generate RFQs in the workflow first.</p>
                 </div>
             `;
@@ -969,7 +968,7 @@ async function loadPendingDrafts() {
         // Don't show error - just show a helpful message
         listContainer.innerHTML = `
             <div class="no-drafts-message">
-                <div class="icon">📝</div>
+                <div class="icon"></div>
                 <p>You're viewing an RFQ draft. Click "Send All RFQ Drafts" to send all pending drafts.</p>
             </div>
         `;
@@ -3156,15 +3155,9 @@ async function loadInitialData() {
         AppState.prs = state.prs;
         renderPRList(AppState.prs);
         
-        // Also restore selected PR if any
-        if (state.selectedPR) {
-            AppState.selectedPR = state.selectedPR;
-            // Re-select it in the UI
-            setTimeout(() => {
-                const prItem = document.querySelector(`[data-pr-id="${state.selectedPR.pr_id}"]`);
-                if (prItem) prItem.classList.add('selected');
-            }, 100);
-        }
+        // Don't restore selected PR on initial page load - let user select manually
+        // This ensures no PR is pre-selected when the page first opens
+        AppState.selectedPR = null;
         return;
     }
     
@@ -3378,8 +3371,9 @@ async function handlePRSelect(pr) {
     
     AppState.selectedPR = pr;
     
-    // Clear RFQs when a new PR is selected (allows generating RFQs for new PR)
+    // Clear RFQs and selected suppliers when a new PR is selected (allows generating RFQs for new PR)
     AppState.rfqs = [];
+    AppState.selectedSuppliers = [];
     
     // Remove success message if it exists
     const successMsg = document.querySelector('.rfq-generated-message');
@@ -3438,7 +3432,6 @@ function renderSupplierList(suppliers) {
     }
     
     suppliers.forEach(supplier => {
-        const scoreClass = Helpers.getMatchScoreClass(supplier.match_score);
         const isSelected = AppState.selectedSuppliers.includes(supplier.supplier_id);
         
         const item = Helpers.createElement('div', {
@@ -3449,7 +3442,7 @@ function renderSupplierList(suppliers) {
             <div class="supplier-info">
                 <div class="list-item-title">
                     ${Helpers.escapeHtml(supplier.name)}
-                    <span class="match-score ${scoreClass}">${supplier.match_score}/10</span>
+                    <span class="match-score">${supplier.match_score}/10</span>
                 </div>
                 <div class="list-item-subtitle">
                     ${Helpers.escapeHtml(supplier.email)}
@@ -3537,6 +3530,12 @@ function updateSelectedSuppliersCount() {
 function openSupplierModal() {
     const modal = document.getElementById('supplier-selection-modal');
     if (!modal) return;
+    
+    // Clear any previous selections when opening the modal
+    // This ensures a clean state when the modal is first opened
+    if (AppState.selectedSuppliers.length > 0 && !AppState.selectedPR) {
+        AppState.selectedSuppliers = [];
+    }
     
     // Render suppliers in modal if we have them
     if (AppState.suppliers && AppState.suppliers.length > 0) {
