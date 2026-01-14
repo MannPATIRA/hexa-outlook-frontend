@@ -8,7 +8,7 @@
 
   <!-- Basic Add-in Information -->
   <Id>a1b2c3d4-e5f6-7890-abcd-ef1234567890</Id>
-  <Version>1.0.5.0</Version>
+  <Version>1.0.6.0</Version>
   <ProviderName>Procurement Team</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="Hexa"/>
@@ -171,11 +171,9 @@
         <bt:ShortStrings>
           <bt:String id="GroupLabel" DefaultValue="Hexa"/>
           <bt:String id="TaskPaneBtn.Label" DefaultValue="Hexa"/>
-          <bt:String id="ClassifyBtn.Label" DefaultValue="Classify Email"/>
         </bt:ShortStrings>
         <bt:LongStrings>
           <bt:String id="TaskPaneBtn.Tooltip" DefaultValue="Open Hexa to manage PRs, RFQs, and supplier communications"/>
-          <bt:String id="ClassifyBtn.Tooltip" DefaultValue="Classify the current email as a quote or clarification request"/>
         </bt:LongStrings>
       </Resources>
 
