@@ -1,5 +1,5 @@
 /**
- * Build script to inject environment variables into env-config.js
+ * Build script to inject environment variables and prepare files for Vercel
  * This allows us to use Vercel environment variables while keeping the code secure
  * 
  * Usage:
@@ -38,7 +38,52 @@ if (window.location.hostname === 'localhost' || window.location.hostname === '12
 const envConfigPath = path.join(__dirname, 'src', 'env-config.js');
 fs.writeFileSync(envConfigPath, envConfigContent, 'utf8');
 
+// For Vercel: Create public directory and copy all necessary files
+const publicDir = path.join(__dirname, 'public');
+if (!fs.existsSync(publicDir)) {
+    fs.mkdirSync(publicDir, { recursive: true });
+}
+
+// Function to copy directory recursively
+function copyDir(src, dest) {
+    if (!fs.existsSync(dest)) {
+        fs.mkdirSync(dest, { recursive: true });
+    }
+    const entries = fs.readdirSync(src, { withFileTypes: true });
+    for (const entry of entries) {
+        const srcPath = path.join(src, entry.name);
+        const destPath = path.join(dest, entry.name);
+        if (entry.isDirectory()) {
+            copyDir(srcPath, destPath);
+        } else {
+            fs.copyFileSync(srcPath, destPath);
+        }
+    }
+}
+
+// Copy all necessary files and directories to public
+const filesToCopy = [
+    'src',
+    'assets',
+    'manifest.xml',
+    'package.json'
+];
+
+for (const item of filesToCopy) {
+    const srcPath = path.join(__dirname, item);
+    const destPath = path.join(publicDir, item);
+    if (fs.existsSync(srcPath)) {
+        const stat = fs.statSync(srcPath);
+        if (stat.isDirectory()) {
+            copyDir(srcPath, destPath);
+        } else {
+            fs.copyFileSync(srcPath, destPath);
+        }
+    }
+}
+
 console.log('✅ Build complete: Environment variables injected');
+console.log('✅ Files copied to public directory for Vercel');
 if (openaiKey) {
     console.log('✅ OpenAI API key found and injected (length: ' + openaiKey.length + ' chars)');
 } else {

@@ -5,6 +5,7 @@
 
 # Build output
 src/env-config.js
+public/
 
 # Node modules
 node_modules/
