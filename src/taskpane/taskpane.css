@@ -930,7 +930,9 @@ main {
     color: #605e5c;
 }
 
+/* Hide Select All checkbox - removed from UI */
 .select-all-label {
+    display: none !important;
     display: flex;
     align-items: center;
     gap: 4px;
@@ -1372,13 +1374,37 @@ textarea.ms-TextField-field {
 
 .supplier-modal-actions {
     display: flex;
-    justify-content: space-between;
+    justify-content: flex-end;
     align-items: center;
+}
+
+.supplier-action-bar {
+    padding: 12px 16px;
+    border-bottom: 1px solid #edebe9;
+    background-color: white;
+    display: flex;
+    align-items: center;
+}
+
+.supplier-action-bar .ms-Button {
+    background-color: transparent;
+    border: 1px solid #0d3d61;
+    color: #0d3d61;
+    padding: 6px 16px;
+    font-size: 13px;
+    font-weight: 500;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+}
+
+.supplier-action-bar .ms-Button:hover {
+    background-color: #0d3d61;
+    color: white;
 }
 
 .supplier-modal-list {
     padding: 16px;
-    max-height: calc(90vh - 250px);
+    max-height: calc(90vh - 300px);
     overflow-y: auto;
 }
 
@@ -1387,16 +1413,13 @@ textarea.ms-TextField-field {
     align-items: center;
     gap: 12px;
     flex: 0 0 auto;
+    margin-left: auto;
 }
 
 #selected-count-display {
-    font-size: 14px;
-    color: #323130;
-    font-weight: 600;
-    padding: 6px 12px;
-    background-color: white;
-    border-radius: 4px;
-    border: 1px solid #edebe9;
+    font-size: 13px;
+    color: #605e5c;
+    font-weight: 500;
     white-space: nowrap;
 }
 
@@ -1507,24 +1530,17 @@ textarea.ms-TextField-field {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    gap: 16px;
-    padding: 16px 20px;
+    gap: 20px;
+    padding: 12px 20px;
     border-top: 1px solid #edebe9;
-    background-color: #faf9f8;
-}
-
-.modal-footer-left {
-    display: flex;
-    align-items: center;
-    flex: 0 0 auto;
+    background-color: white;
 }
 
 .modal-footer-center {
     display: flex;
     align-items: center;
-    justify-content: center;
     flex: 1;
-    min-width: 0;
+    justify-content: center;
 }
 
 .setting-group {

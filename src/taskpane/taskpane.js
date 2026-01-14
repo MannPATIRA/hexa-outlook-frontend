@@ -3039,9 +3039,6 @@ function setupEventListeners() {
     // Generate RFQs step
     document.getElementById('generate-rfqs-step-title')?.addEventListener('click', handleGenerateRFQs);
 
-    // Send all RFQs
-    document.getElementById('send-all-rfqs-btn')?.addEventListener('click', handleSendAllRFQs);
-
     // Email processing
     document.getElementById('classify-email-btn')?.addEventListener('click', handleClassifyEmail);
     document.getElementById('extract-quote-btn')?.addEventListener('click', handleExtractQuote);
@@ -3733,11 +3730,13 @@ async function handleGenerateRFQs() {
         
         AppState.rfqs = rfqs;
         
-        // Disable the Generate RFQs step (mark as completed)
+        // Keep the Generate RFQs step enabled (highlighted) after completion
+        // This matches the behavior of other completed steps (Select PR, Select Suppliers)
         const generateStep = document.getElementById('step-generate-rfqs');
         if (generateStep) {
-            generateStep.classList.add('disabled');
-            // Optionally add a visual indicator that it's completed
+            // Remove disabled class if it exists, to ensure it stays highlighted
+            generateStep.classList.remove('disabled');
+            // The step remains clickable and highlighted like other completed steps
         }
         
         // Enable the Review & Send RFQs step
@@ -3799,9 +3798,6 @@ function renderRFQCards(rfqs) {
         
         container.appendChild(card);
     });
-    
-    // Enable action buttons
-    document.getElementById('send-all-rfqs-btn').disabled = false;
 }
 
 // ==================== RFQ PREVIEW & EDITING ====================
@@ -4030,143 +4026,6 @@ async function handleCreateAllDrafts() {
         Helpers.showSuccess(`${AppState.rfqs.length} draft(s) created successfully`);
     } catch (error) {
         Helpers.showError('Failed to create drafts: ' + error.message);
-    } finally {
-        Helpers.hideLoading();
-    }
-}
-
-async function handleSendAllRFQs() {
-    if (!AuthService.isSignedIn()) {
-        Helpers.showError('Please sign in to send emails');
-        return;
-    }
-
-    if (!AppState.selectedPR || AppState.rfqs.length === 0) {
-        Helpers.showError('No RFQs to send');
-        return;
-    }
-
-    try {
-        Helpers.showLoading('Sending RFQs...');
-
-        // Extract material code from selected PR
-        const materialCode = Helpers.extractMaterialCode(AppState.selectedPR);
-
-        // Create folder structure before sending
-        try {
-            await FolderManagement.initializeMaterialFolders(materialCode);
-        } catch (error) {
-            console.error('Failed to create folder structure:', error);
-            // Continue sending even if folder creation fails
-        }
-
-        let successCount = 0;
-        let failCount = 0;
-
-        // Send each RFQ
-        for (const rfq of AppState.rfqs) {
-            try {
-                // Extract body content and convert to HTML
-                const bodyContent = EmailOperations.extractBodyContent(rfq.body);
-                let htmlBody = '';
-                if (bodyContent && typeof bodyContent === 'string' && bodyContent.trim().length > 0) {
-                    if (bodyContent.trim().toLowerCase().startsWith('<') && 
-                        (bodyContent.includes('</') || bodyContent.includes('/>'))) {
-                        htmlBody = bodyContent;
-                    } else {
-                        htmlBody = EmailOperations.formatTextAsHtml(bodyContent);
-                    }
-                } else {
-                    htmlBody = '<div>&nbsp;</div>';
-                }
-
-                // Validate email address
-                if (!rfq.supplier_email || !rfq.supplier_email.includes('@')) {
-                    throw new Error(`Invalid email address: ${rfq.supplier_email}`);
-                }
-
-                // Send email with materialCode for folder organization
-                console.log(`Sending RFQ to ${rfq.supplier_name} (${rfq.supplier_email})`);
-                const sendResult = await EmailOperations.sendEmail({
-                    to: [rfq.supplier_email],
-                    subject: rfq.subject || '',
-                    body: htmlBody,
-                    cc: [],
-                    materialCode: materialCode
-                });
-
-                // Delete the draft if it exists (draft was auto-created when RFQs were generated)
-                if (rfq.draftId) {
-                    try {
-                        console.log(`Deleting draft ${rfq.draftId} for ${rfq.supplier_name}`);
-                        await EmailOperations.deleteDraft(rfq.draftId);
-                        // Remove draftId from RFQ object since it's been deleted
-                        delete rfq.draftId;
-                    } catch (error) {
-                        console.error(`Failed to delete draft for ${rfq.supplier_name}:`, error);
-                        // Continue even if draft deletion fails
-                    }
-                }
-
-                // Schedule auto-reply for demo/testing purposes
-                if (sendResult.internetMessageId) {
-                    try {
-                        const userEmail = Office.context.mailbox.userProfile?.emailAddress;
-                        const materialName = AppState.selectedPR?.material || 
-                                           AppState.selectedPR?.description || 
-                                           materialCode;
-                        const quantity = AppState.selectedPR?.quantity || 100;
-
-                        if (userEmail) {
-                            console.log(`Scheduling auto-reply for RFQ to ${rfq.supplier_name}...`);
-                            const replyResult = await ApiClient.scheduleAutoReply({
-                                toEmail: userEmail,
-                                subject: rfq.subject || '',
-                                internetMessageId: sendResult.internetMessageId,
-                                material: materialName,
-                                replyType: 'random',
-                                delaySeconds: 5,
-                                quantity: quantity
-                            });
-                            console.log(`✓ Auto-reply scheduled for ${rfq.supplier_name}:`, replyResult);
-                        } else {
-                            console.warn('Could not get user email for auto-reply scheduling');
-                        }
-                    } catch (replyError) {
-                        // Non-critical: don't fail the send if auto-reply scheduling fails
-                        console.error(`Failed to schedule auto-reply for ${rfq.supplier_name}:`, replyError);
-                    }
-                } else {
-                    console.warn(`No internetMessageId available for ${rfq.supplier_name} - auto-reply not scheduled`);
-                }
-
-                console.log(`Successfully sent RFQ to ${rfq.supplier_name}`);
-                successCount++;
-            } catch (error) {
-                console.error(`Failed to send RFQ to ${rfq.supplier_name} (${rfq.supplier_email}):`, error);
-                console.error('Error details:', error.message, error.stack);
-                failCount++;
-                // Continue with other RFQs even if one fails
-            }
-        }
-
-        // Update RFQ statuses and re-render (drafts have been deleted, so buttons will update)
-        AppState.rfqs.forEach(rfq => {
-            rfq.status = 'sent';
-            // Drafts have been deleted, so remove draftId
-            if (rfq.draftId) {
-                delete rfq.draftId;
-            }
-        });
-        renderRFQCards(AppState.rfqs);
-
-        if (failCount === 0) {
-            Helpers.showSuccess(`All ${successCount} RFQ(s) sent successfully. Replies will arrive in ~5 seconds.`);
-        } else {
-            Helpers.showError(`${successCount} sent, ${failCount} failed`);
-        }
-    } catch (error) {
-        Helpers.showError('Failed to send RFQs: ' + error.message);
     } finally {
         Helpers.hideLoading();
     }

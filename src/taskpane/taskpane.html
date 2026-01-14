@@ -330,11 +330,6 @@
                         <div id="rfq-list" class="rfq-cards-container">
                             <!-- RFQ cards will be inserted here -->
                         </div>
-                        <div class="action-buttons">
-                            <button id="send-all-rfqs-btn" class="ms-Button ms-Button--primary" disabled>
-                                <span class="ms-Button-label">Send All RFQs</span>
-                            </button>
-                        </div>
                     </div>
                 </div>
 
@@ -554,23 +549,19 @@
                         </div>
                         <div class="supplier-modal-actions">
                             <span id="supplier-count">0 suppliers found</span>
-                            <label class="select-all-label">
-                                <input type="checkbox" id="select-all-suppliers"/>
-                                Select All
-                            </label>
                         </div>
+                    </div>
+                    <div class="supplier-action-bar">
+                        <button id="add-new-supplier-btn" class="ms-Button">
+                            <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--Add"></i></span>
+                            <span class="ms-Button-label">Add New Supplier</span>
+                        </button>
                     </div>
                     <div id="supplier-list" class="selectable-list checkbox-list supplier-modal-list">
                         <!-- Supplier items will be inserted here -->
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <div class="modal-footer-left">
-                        <button id="add-new-supplier-btn" class="ms-Button">
-                            <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--Add"></i></span>
-                            <span class="ms-Button-label">Add New Supplier</span>
-                        </button>
-                    </div>
                     <div class="modal-footer-center">
                         <span id="selected-count-display">0 selected</span>
                     </div>
