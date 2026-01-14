@@ -50,9 +50,19 @@ const Config = {
     REQUEST_TIMEOUT: 30000,
 
     // OpenAI API Configuration
-    // SECURITY WARNING: API key is exposed in frontend code
-    // In production, this should be moved to backend to prevent key exposure
-    OPENAI_API_KEY: 'REMOVED_SECRET',
+    // SECURITY: API key should be stored securely and not committed to git
+    // For frontend, use localStorage for user configuration
+    // In production, API calls should be proxied through backend to prevent key exposure
+    get OPENAI_API_KEY() {
+        // Get from localStorage (user must configure this in settings)
+        // This prevents the key from being committed to the repository
+        const storedKey = localStorage.getItem('procurement_openai_api_key');
+        if (storedKey) return storedKey;
+        
+        // Return empty string if not configured (will cause API calls to fail)
+        // User must set the key via settings UI or localStorage
+        return '';
+    },
     OPENAI_API_BASE_URL: 'https://api.openai.com/v1',
 
     // Load settings from local storage
