@@ -95,8 +95,8 @@
                 
                 <!-- Pending Drafts Section (shown when there are drafts to send) -->
                 <div id="draft-list-section" class="draft-list-section">
-                    <h3>RFQ Drafts Ready to Send</h3>
-                    <div id="pending-drafts-list" class="pending-drafts-list">
+                    <h3>RFQs ready to send</h3>
+                    <div id="draft-summary-card" class="draft-summary-card">
                         <p class="loading-text">Loading drafts...</p>
                     </div>
                 </div>
@@ -104,7 +104,10 @@
                 <div id="draft-actions-section" class="draft-actions">
                     <button id="send-all-drafts-btn" class="ms-Button ms-Button--primary ms-Button--large">
                         <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--Send"></i></span>
-                        <span class="ms-Button-label">Send All RFQ Drafts</span>
+                        <span class="ms-Button-label">Send all RFQs</span>
+                    </button>
+                    <button id="view-draft-details-btn" class="ms-Button ms-Button--default">
+                        <span class="ms-Button-label">View details</span>
                     </button>
                     <p class="warning-text">Sending will close this panel when the current draft is sent. Reopen the add-in to see results.</p>
                 </div>
@@ -605,6 +608,23 @@
                     <button id="apply-pr-selection" class="ms-Button ms-Button--primary">
                         <span class="ms-Button-label">Done</span>
                     </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Draft Details Modal -->
+        <div id="draft-details-modal" class="modal hidden">
+            <div class="modal-content modal-large">
+                <div class="modal-header">
+                    <h2>RFQ Drafts</h2>
+                    <button id="close-draft-details-modal" class="ms-Button ms-Button--icon">
+                        <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--Cancel"></i></span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div id="draft-details-list" class="pending-drafts-list">
+                        <!-- Draft items will be inserted here -->
+                    </div>
                 </div>
             </div>
         </div>
