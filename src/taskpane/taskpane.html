@@ -315,27 +315,24 @@
 
                 <!-- Step 2: Select Suppliers -->
                 <div id="step-select-suppliers" class="workflow-step disabled">
-                    <h2 class="ms-font-l step-header">
+                    <h2 class="ms-font-l step-header clickable-step-title" id="supplier-step-title">
                         <span class="step-number">2</span>
-                        Select Suppliers
+                        <span class="step-title-text">Select Suppliers</span>
                     </h2>
-                    <div class="step-content">
-                        <div id="supplier-selection-summary">
-                            <p id="selected-suppliers-count">0 suppliers selected</p>
-                            <button id="open-supplier-modal-btn" class="ms-Button ms-Button--primary">
-                                <span class="ms-Button-label">Select Suppliers</span>
-                            </button>
-                        </div>
-                        <button id="generate-rfqs-btn" class="ms-Button ms-Button--primary" disabled>
-                            <span class="ms-Button-label">Generate RFQs</span>
-                        </button>
-                    </div>
                 </div>
 
-                <!-- Step 3: Review & Send RFQs -->
+                <!-- Step 3: Generate RFQs -->
+                <div id="step-generate-rfqs" class="workflow-step disabled">
+                    <h2 class="ms-font-l step-header clickable-step-title" id="generate-rfqs-step-title">
+                        <span class="step-number">3</span>
+                        <span class="step-title-text">Generate RFQs</span>
+                    </h2>
+                </div>
+
+                <!-- Step 4: Review & Send RFQs -->
                 <div id="step-review-rfqs" class="workflow-step disabled">
                     <h2 class="ms-font-l step-header">
-                        <span class="step-number">3</span>
+                        <span class="step-number">4</span>
                         Review & Send RFQs
                     </h2>
                     <div class="step-content">
@@ -577,12 +574,16 @@
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button id="add-new-supplier-btn" class="ms-Button">
-                        <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--Add"></i></span>
-                        <span class="ms-Button-label">Add New Supplier</span>
-                    </button>
-                    <div class="modal-footer-right">
+                    <div class="modal-footer-left">
+                        <button id="add-new-supplier-btn" class="ms-Button">
+                            <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--Add"></i></span>
+                            <span class="ms-Button-label">Add New Supplier</span>
+                        </button>
+                    </div>
+                    <div class="modal-footer-center">
                         <span id="selected-count-display">0 selected</span>
+                    </div>
+                    <div class="modal-footer-right">
                         <button id="apply-supplier-selection" class="ms-Button ms-Button--primary">
                             <span class="ms-Button-label">Done</span>
                         </button>

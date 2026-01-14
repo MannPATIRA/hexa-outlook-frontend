@@ -661,6 +661,7 @@ main {
     cursor: pointer;
     user-select: none;
     transition: color 0.2s ease;
+    pointer-events: auto !important; /* Ensure clickable even if parent is disabled */
 }
 
 .clickable-step-title:hover {
@@ -770,6 +771,12 @@ main {
     display: flex;
     align-items: flex-start;
     gap: 10px;
+}
+
+/* Hide checkboxes - using blue bar selection instead */
+.checkbox-list .list-item input[type="checkbox"],
+.supplier-checkbox {
+    display: none !important;
 }
 
 .checkbox-list .list-item input[type="checkbox"] {
@@ -1242,12 +1249,18 @@ textarea.ms-TextField-field {
     display: flex;
     align-items: center;
     gap: 12px;
+    flex: 0 0 auto;
 }
 
 #selected-count-display {
     font-size: 14px;
-    color: #605e5c;
-    font-weight: 500;
+    color: #323130;
+    font-weight: 600;
+    padding: 6px 12px;
+    background-color: white;
+    border-radius: 4px;
+    border: 1px solid #edebe9;
+    white-space: nowrap;
 }
 
 #supplier-selection-summary {
@@ -1355,10 +1368,26 @@ textarea.ms-TextField-field {
 
 .modal-footer {
     display: flex;
-    justify-content: flex-end;
-    gap: 10px;
-    padding: 16px;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    padding: 16px 20px;
     border-top: 1px solid #edebe9;
+    background-color: #faf9f8;
+}
+
+.modal-footer-left {
+    display: flex;
+    align-items: center;
+    flex: 0 0 auto;
+}
+
+.modal-footer-center {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    min-width: 0;
 }
 
 .setting-group {
