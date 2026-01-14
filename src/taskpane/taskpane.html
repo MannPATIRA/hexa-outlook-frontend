@@ -188,7 +188,6 @@
         <!-- Clarification Mode - Shown when user clicks on a clarification email -->
         <div id="clarification-mode" class="mode-container hidden">
             <div class="mode-header clarification-header">
-                <div class="mode-icon">❓</div>
                 <h2>Clarification Request</h2>
             </div>
             <div class="mode-body">
@@ -197,20 +196,12 @@
                 </div>
                 
                 <div id="clarification-question-section" class="question-section">
-                    <h3>Supplier's Question</h3>
-                    <div id="clarification-question-text" class="question-box">
-                        <!-- Question will be extracted and shown here -->
+                    <h3>Supplier's Questions</h3>
+                    <div id="clarification-questions-list" class="questions-list">
+                        <!-- Questions will be extracted and displayed here as cards -->
                     </div>
-                </div>
-                
-                <div id="suggested-answers-section" class="suggested-answers-section">
-                    <h3>Suggested Response</h3>
-                    <div id="suggested-answer-loading" class="loading-indicator">
-                        <div class="spinner-small"></div>
-                        <span>Getting AI-suggested response...</span>
-                    </div>
-                    <div id="suggested-answer-content" class="hidden">
-                        <textarea id="clarification-response-text" class="ms-TextField-field response-textarea" rows="8" placeholder="Suggested response will appear here..."></textarea>
+                    <div id="clarification-question-text" class="question-box hidden">
+                        <!-- Fallback: full email body if no questions parsed -->
                     </div>
                 </div>
                 

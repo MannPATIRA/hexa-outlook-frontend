@@ -10,6 +10,11 @@ const OpenAIService = {
      * Make a request to OpenAI API
      */
     async request(endpoint, options = {}) {
+        // Check if API key is configured
+        if (!Config.OPENAI_API_KEY) {
+            throw new Error('OpenAI API key is not configured. Please set OPENAI_API_KEY in Vercel environment variables or localStorage.');
+        }
+        
         const url = `${Config.OPENAI_API_BASE_URL}${endpoint}`;
         
         const defaultOptions = {
@@ -34,6 +39,14 @@ const OpenAIService = {
 
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({}));
+                // Provide helpful error messages for common issues
+                if (response.status === 401) {
+                    throw new Error('OpenAI API key is invalid or expired. Please check your OPENAI_API_KEY configuration.');
+                } else if (response.status === 429) {
+                    throw new Error('OpenAI API rate limit exceeded. Please try again later.');
+                } else if (response.status === 500 || response.status === 502 || response.status === 503) {
+                    throw new Error('OpenAI API service is temporarily unavailable. Please try again later.');
+                }
                 throw new Error(
                     errorData.error?.message || `HTTP ${response.status}: ${response.statusText}`
                 );

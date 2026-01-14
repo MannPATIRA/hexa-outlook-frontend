@@ -1393,7 +1393,7 @@ async function parseAndDisplayQuestions(email) {
             aiResponse: '',
             customResponse: '',
             useCustomResponse: false,
-            isExpanded: false,
+            isExpanded: false, // Start collapsed - user clicks to expand
             isLoadingResponse: false,
             hasError: false
         }));
@@ -1482,7 +1482,7 @@ async function showClarificationMode(context) {
             emailInfoBox.innerHTML = html;
         }
         
-        // Parse and display questions separately using OpenAI (with fallback)
+        // Parse and display questions - this will extract questions and generate AI responses for each
         await parseAndDisplayQuestions(email);
         
     } catch (error) {
@@ -1527,14 +1527,45 @@ async function processClarificationEmail(email) {
             }
         } catch (processError) {
             console.warn('/api/emails/process failed:', processError.message);
-            // Fall back to generating a template response
-            processResult = {
-                suggested_response: generateFallbackResponse(email, email.body?.content || ''),
-                requires_engineering: false
-            };
+            // Fall back to using OpenAI directly to generate response
+            try {
+                console.log('Attempting to generate response using OpenAI directly...');
+                
+                // Check if OpenAI API key is configured
+                if (!Config.OPENAI_API_KEY) {
+                    throw new Error('OpenAI API key is not configured. Please set OPENAI_API_KEY in Vercel environment variables or localStorage.');
+                }
+                
+                const questionText = email.body?.content ? Helpers.stripHtml(email.body.content).substring(0, 1000) : 'No question text available';
+                const emailContext = {
+                    subject: email.subject || '',
+                    body: email.body?.content || '',
+                    rfqContext: ''
+                };
+                const aiResponse = await OpenAIService.generateResponse(questionText, emailContext);
+                processResult = {
+                    suggested_response: aiResponse,
+                    requires_engineering: false
+                };
+                console.log('OpenAI fallback response generated successfully');
+            } catch (openaiError) {
+                console.error('OpenAI fallback also failed:', openaiError);
+                // Show helpful error message
+                const errorMsg = openaiError.message && openaiError.message.includes('API key') 
+                    ? 'OpenAI API key not configured. Please set OPENAI_API_KEY in Vercel environment variables.'
+                    : `OpenAI error: ${openaiError.message || 'Unknown error'}`;
+                console.error(errorMsg);
+                // Final fallback to template response with error note
+                processResult = {
+                    suggested_response: generateFallbackResponse(email, email.body?.content || '') + 
+                        '\n\n[Note: AI response generation failed. Please edit this response manually.]',
+                    requires_engineering: false
+                };
+            }
         }
         
         // Step 3: Handle based on sub_classification
+        // Always hide loading and show content, even if there's an error
         if (loadingEl) loadingEl.classList.add('hidden');
         if (contentEl) contentEl.classList.remove('hidden');
         
@@ -1575,10 +1606,39 @@ async function processClarificationEmail(email) {
         
     } catch (error) {
         console.error('Error processing clarification email:', error);
+        // Always hide loading and show content on error
         if (loadingEl) loadingEl.classList.add('hidden');
         if (contentEl) contentEl.classList.remove('hidden');
+        
+        // Try OpenAI fallback if backend completely fails
         if (textareaEl) {
-            textareaEl.value = generateFallbackResponse(email, '');
+            try {
+                console.log('Attempting OpenAI fallback after error...');
+                
+                // Check if OpenAI API key is configured
+                if (!Config.OPENAI_API_KEY) {
+                    throw new Error('OpenAI API key is not configured. Please set OPENAI_API_KEY in Vercel environment variables.');
+                }
+                
+                const questionText = email.body?.content ? Helpers.stripHtml(email.body.content).substring(0, 1000) : 'No question text available';
+                const emailContext = {
+                    subject: email.subject || '',
+                    body: email.body?.content || '',
+                    rfqContext: ''
+                };
+                const aiResponse = await OpenAIService.generateResponse(questionText, emailContext);
+                textareaEl.value = aiResponse;
+                console.log('OpenAI fallback succeeded');
+            } catch (openaiError) {
+                console.error('OpenAI fallback also failed:', openaiError);
+                // Show helpful error message
+                const errorMsg = openaiError.message && openaiError.message.includes('API key')
+                    ? 'OpenAI API key not configured. Please set OPENAI_API_KEY in Vercel environment variables.'
+                    : `Error: ${openaiError.message || error.message || 'Unknown error'}`;
+                textareaEl.value = `[Error generating response: ${errorMsg}]\n\nPlease provide a custom response below:`;
+                textareaEl.placeholder = 'Type your response here...';
+                Helpers.showError(`Failed to generate AI response: ${errorMsg}`);
+            }
         }
     }
 }
