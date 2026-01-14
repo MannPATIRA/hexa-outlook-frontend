@@ -2726,6 +2726,21 @@ async function initializeApp() {
     // Load saved settings
     Config.loadSettings();
     
+    // Fix any stuck overlays or modals
+    const loadingOverlay = document.getElementById('loading-overlay');
+    if (loadingOverlay && !loadingOverlay.classList.contains('hidden')) {
+        console.log('Found stuck loading overlay, closing it...');
+        loadingOverlay.classList.add('hidden');
+    }
+    
+    // Close any stuck modals
+    document.querySelectorAll('.modal').forEach(modal => {
+        if (!modal.classList.contains('hidden')) {
+            console.log('Found stuck modal, closing it...', modal.id);
+            modal.classList.add('hidden');
+        }
+    });
+    
         // Set up event listeners FIRST (so UI is responsive)
     setupEventListeners();
         setupModeEventListeners();
@@ -2956,15 +2971,73 @@ function setupEventListeners() {
     document.getElementById('close-settings')?.addEventListener('click', closeSettingsModal);
     document.getElementById('save-settings')?.addEventListener('click', saveSettings);
 
-    // PR search
+    // PR modal - with retry mechanism
+    // PR Button - Use event delegation (works even if element is added dynamically)
+    console.log('Setting up PR button event delegation...');
+    
+    // Event delegation on document (always works)
+    document.addEventListener('click', (e) => {
+        const target = e.target.closest('#pr-step-title');
+        if (target) {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('PR step title clicked (via delegation)');
+            openPRModal();
+        }
+    });
+    
+    // Also try direct listener as backup
+    const attachPRButtonListener = () => {
+        const prStepTitle = document.getElementById('pr-step-title');
+        if (prStepTitle) {
+            prStepTitle.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log('PR step title clicked (via direct listener)');
+                openPRModal();
+            });
+            console.log('PR step title direct event listener attached');
+            return true;
+        } else {
+            console.warn('PR step title element not found for direct listener');
+            return false;
+        }
+    };
+    
+    // Try to attach direct listener immediately
+    attachPRButtonListener();
+    
+    // Retry direct listener after delay
+    setTimeout(() => {
+        attachPRButtonListener();
+    }, 500);
+    document.getElementById('close-pr-modal')?.addEventListener('click', closePRModal);
+    document.getElementById('apply-pr-selection')?.addEventListener('click', applyPRSelection);
+    
+    // Close PR modal on ESC key
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            const prModal = document.getElementById('pr-selection-modal');
+            if (prModal && !prModal.classList.contains('hidden')) {
+                closePRModal();
+            }
+        }
+    });
     document.getElementById('pr-search')?.addEventListener('input', 
         Helpers.debounce(handlePRSearch, 300));
 
     // Select all suppliers
     document.getElementById('select-all-suppliers')?.addEventListener('change', handleSelectAllSuppliers);
 
-    // Generate RFQs button
-    document.getElementById('generate-rfqs-btn')?.addEventListener('click', handleGenerateRFQs);
+    // Supplier modal
+    document.getElementById('supplier-step-title')?.addEventListener('click', openSupplierModal);
+    document.getElementById('close-supplier-modal')?.addEventListener('click', closeSupplierModal);
+    document.getElementById('apply-supplier-selection')?.addEventListener('click', applySupplierSelection);
+    document.getElementById('add-new-supplier-btn')?.addEventListener('click', handleAddNewSupplier);
+    document.getElementById('supplier-search')?.addEventListener('input', handleSupplierSearch);
+
+    // Generate RFQs step
+    document.getElementById('generate-rfqs-step-title')?.addEventListener('click', handleGenerateRFQs);
 
     // Send all RFQs
     document.getElementById('send-all-rfqs-btn')?.addEventListener('click', handleSendAllRFQs);
@@ -2995,8 +3068,46 @@ function setupEventListeners() {
         Helpers.hideElement(document.getElementById('success-banner'));
     });
     
-    // Pin reminder banner
-    document.getElementById('dismiss-pin-reminder')?.addEventListener('click', dismissPinReminder);
+    // Pin reminder banner - Use event delegation (works even if element is added dynamically)
+    console.log('Setting up banner close button event delegation...');
+    
+    // Event delegation on document (always works)
+    document.addEventListener('click', (e) => {
+        // Check if click is on the dismiss button or its icon
+        const dismissBtn = e.target.closest('#dismiss-pin-reminder');
+        if (dismissBtn) {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('Dismiss pin reminder button clicked (via delegation)');
+            dismissPinReminder();
+        }
+    });
+    
+    // Also try direct listener as backup
+    const attachBannerCloseListener = () => {
+        const dismissBtn = document.getElementById('dismiss-pin-reminder');
+        if (dismissBtn) {
+            dismissBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log('Dismiss pin reminder button clicked (via direct listener)');
+                dismissPinReminder();
+            });
+            console.log('Pin reminder dismiss button direct event listener attached');
+            return true;
+        } else {
+            console.warn('Dismiss pin reminder button not found for direct listener');
+            return false;
+        }
+    };
+    
+    // Try to attach direct listener immediately
+    attachBannerCloseListener();
+    
+    // Retry direct listener after delay
+    setTimeout(() => {
+        attachBannerCloseListener();
+    }, 500);
     
     // Check if pin reminder was previously dismissed
     initPinReminder();
@@ -3020,10 +3131,19 @@ function initPinReminder() {
  * Dismiss the pin reminder and remember the choice
  */
 function dismissPinReminder() {
-    const pinReminderBanner = document.getElementById('pin-reminder-banner');
-    pinReminderBanner?.classList.add('hidden');
-    localStorage.setItem('procurement_pin_reminder_dismissed', 'true');
-    console.log('Pin reminder dismissed and saved');
+    console.log('dismissPinReminder called');
+    try {
+        const pinReminderBanner = document.getElementById('pin-reminder-banner');
+        if (pinReminderBanner) {
+            pinReminderBanner.classList.add('hidden');
+            localStorage.setItem('procurement_pin_reminder_dismissed', 'true');
+            console.log('Pin reminder dismissed and saved');
+        } else {
+            console.warn('Pin reminder banner not found');
+        }
+    } catch (error) {
+        console.error('Error dismissing pin reminder:', error);
+    }
 }
 
 // ==================== TAB NAVIGATION ====================
@@ -3142,6 +3262,113 @@ function handlePRSearch(event) {
     renderPRList(filtered);
 }
 
+function openPRModal() {
+    console.log('openPRModal called');
+    try {
+        const modal = document.getElementById('pr-selection-modal');
+        if (!modal) {
+            console.error('PR modal not found');
+            return;
+        }
+        
+        // Ensure any stuck loading overlays are closed
+        Helpers.hideLoading();
+        
+        // Load PRs if not already loaded
+        if (!AppState.prs || AppState.prs.length === 0) {
+            loadOpenPRs().then(() => {
+                if (AppState.prs && AppState.prs.length > 0) {
+                    renderPRList(AppState.prs);
+                }
+            }).catch(error => {
+                console.error('Error loading PRs:', error);
+                Helpers.showError('Failed to load PRs: ' + error.message);
+            });
+        } else {
+            renderPRList(AppState.prs);
+        }
+        
+        // Restore selection if PR is already selected
+        if (AppState.selectedPR) {
+            restorePRSelection();
+        }
+        
+        // Show modal
+        modal.classList.remove('hidden');
+        
+        // Close modal when clicking outside (on the modal backdrop)
+        const modalContent = modal.querySelector('.modal-content');
+        if (modalContent) {
+            // Remove any existing click handlers to avoid duplicates
+            modalContent.onclick = null;
+            modal.onclick = (e) => {
+                // If click is on the modal backdrop (not on modal-content), close it
+                if (e.target === modal) {
+                    closePRModal();
+                }
+            };
+        }
+        
+        // Focus search input
+        const searchInput = document.getElementById('pr-search');
+        if (searchInput) {
+            setTimeout(() => searchInput.focus(), 100);
+        }
+    } catch (error) {
+        console.error('Error in openPRModal:', error);
+        Helpers.showError('Failed to open PR selection: ' + error.message);
+    }
+}
+
+function closePRModal() {
+    console.log('closePRModal called');
+    try {
+        const modal = document.getElementById('pr-selection-modal');
+        if (modal) {
+            modal.classList.add('hidden');
+        }
+        // Also ensure loading overlay is closed
+        Helpers.hideLoading();
+    } catch (error) {
+        console.error('Error in closePRModal:', error);
+    }
+}
+
+function applyPRSelection() {
+    // Close modal
+    closePRModal();
+}
+
+function restorePRSelection() {
+    // Highlight selected PR in modal
+    if (AppState.selectedPR) {
+        document.querySelectorAll('#pr-list .list-item').forEach(item => {
+            item.classList.remove('selected');
+            if (item.dataset.prId === AppState.selectedPR.pr_id) {
+                item.classList.add('selected');
+            }
+        });
+        
+        // Show selected PR details in modal
+        updatePRDetailsInModal();
+    }
+}
+
+function updatePRDetailsInModal() {
+    const detailsContainer = document.getElementById('pr-details');
+    const infoContainer = document.getElementById('selected-pr-info');
+    
+    if (AppState.selectedPR && detailsContainer) {
+        const description = AppState.selectedPR.description || 'N/A';
+        detailsContainer.innerHTML = `
+            <p class="pr-description">${Helpers.escapeHtml(description)}</p>
+        `;
+        if (infoContainer) infoContainer.classList.remove('hidden');
+    } else {
+        if (infoContainer) infoContainer.classList.add('hidden');
+    }
+}
+
 // ==================== PR SELECTION ====================
 async function handlePRSelect(pr) {
     // Update UI selection state
@@ -3164,7 +3391,7 @@ async function handlePRSelect(pr) {
     }
     
     // Reset button state
-    updateGenerateRFQsButton();
+    updateGenerateRFQsStep();
     
     // Persist the selection
     persistState({ 
@@ -3173,20 +3400,12 @@ async function handlePRSelect(pr) {
         currentStep: 'suppliers'
     });
     
-    // Show PR details
-    const detailsContainer = document.getElementById('pr-details');
-    if (detailsContainer) {
-        detailsContainer.innerHTML = `
-            <p><strong>PR ID:</strong> ${Helpers.escapeHtml(pr.pr_id)}</p>
-            <p><strong>Material:</strong> ${Helpers.escapeHtml(pr.material || 'N/A')}</p>
-            <p><strong>Quantity:</strong> ${pr.quantities || 'N/A'} ${pr.unit || ''}</p>
-            <p><strong>Description:</strong> ${Helpers.escapeHtml(pr.description || 'N/A')}</p>
-        `;
-    }
-    Helpers.showElement(document.getElementById('selected-pr-info'));
+    // Update PR details in modal
+    updatePRDetailsInModal();
     
     // Enable supplier step and load suppliers
     Helpers.enableStep(document.getElementById('step-select-suppliers'));
+    // Step 3 (Generate RFQs) will be enabled when suppliers are selected (handled in updateGenerateRFQsStep)
     
     try {
         Helpers.showLoading('Searching for matching suppliers...');
@@ -3208,7 +3427,9 @@ function renderSupplierList(suppliers) {
     if (!container) return;
     
     Helpers.clearChildren(container);
-    AppState.selectedSuppliers = [];
+    // Don't clear selectedSuppliers - preserve selection when re-rendering
+    // AppState.selectedSuppliers = [];
+    updateGenerateRFQsStep();
     
     if (countEl) {
         countEl.textContent = `${suppliers.length} supplier${suppliers.length !== 1 ? 's' : ''} found`;
@@ -3221,14 +3442,13 @@ function renderSupplierList(suppliers) {
     
     suppliers.forEach(supplier => {
         const scoreClass = Helpers.getMatchScoreClass(supplier.match_score);
+        const isSelected = AppState.selectedSuppliers.includes(supplier.supplier_id);
         
         const item = Helpers.createElement('div', {
-            className: 'list-item',
-            dataset: { supplierId: supplier.supplier_id }
+            className: `list-item ${isSelected ? 'selected' : ''}`,
+            dataset: { supplierId: supplier.supplier_id },
+            onClick: () => handleSupplierSelect(supplier.supplier_id)
         }, `
-            <input type="checkbox" class="supplier-checkbox" 
-                   data-supplier-id="${supplier.supplier_id}"
-                   onchange="handleSupplierCheckboxChange(this)">
             <div class="supplier-info">
                 <div class="list-item-title">
                     ${Helpers.escapeHtml(supplier.name)}
@@ -3247,84 +3467,173 @@ function renderSupplierList(suppliers) {
         container.appendChild(item);
     });
     
-    updateGenerateRFQsButton();
+    updateGenerateRFQsStep();
 }
 
-function handleSupplierCheckboxChange(checkbox) {
-    const supplierId = checkbox.dataset.supplierId;
+function handleSupplierSelect(supplierId) {
+    const item = document.querySelector(`[data-supplier-id="${supplierId}"]`);
+    if (!item) return;
     
-    if (checkbox.checked) {
-        if (!AppState.selectedSuppliers.includes(supplierId)) {
-            AppState.selectedSuppliers.push(supplierId);
-        }
-    } else {
+    const isSelected = AppState.selectedSuppliers.includes(supplierId);
+    
+    if (isSelected) {
+        // Deselect
         AppState.selectedSuppliers = AppState.selectedSuppliers.filter(id => id !== supplierId);
+        item.classList.remove('selected');
+    } else {
+        // Select
+        AppState.selectedSuppliers.push(supplierId);
+        item.classList.add('selected');
     }
     
     // Update select all checkbox
-    const allCheckboxes = document.querySelectorAll('.supplier-checkbox');
+    const allItems = document.querySelectorAll('#supplier-list .list-item');
     const selectAllCheckbox = document.getElementById('select-all-suppliers');
     if (selectAllCheckbox) {
-        selectAllCheckbox.checked = AppState.selectedSuppliers.length === allCheckboxes.length;
+        selectAllCheckbox.checked = AppState.selectedSuppliers.length === allItems.length && allItems.length > 0;
     }
     
-    updateGenerateRFQsButton();
+    updateSelectedSuppliersCount();
+    updateGenerateRFQsStep();
+}
+
+// Keep old function for backward compatibility (if called from elsewhere)
+function handleSupplierCheckboxChange(checkbox) {
+    const supplierId = checkbox.dataset.supplierId;
+    handleSupplierSelect(supplierId);
 }
 
 function handleSelectAllSuppliers(event) {
     const isChecked = event.target.checked;
-    const checkboxes = document.querySelectorAll('.supplier-checkbox');
+    const items = document.querySelectorAll('#supplier-list .list-item');
     
     AppState.selectedSuppliers = [];
     
-    checkboxes.forEach(cb => {
-        cb.checked = isChecked;
+    items.forEach(item => {
+        const supplierId = item.dataset.supplierId;
         if (isChecked) {
-            AppState.selectedSuppliers.push(cb.dataset.supplierId);
+            AppState.selectedSuppliers.push(supplierId);
+            item.classList.add('selected');
+        } else {
+            item.classList.remove('selected');
         }
     });
     
-    updateGenerateRFQsButton();
+    updateSelectedSuppliersCount();
+    updateGenerateRFQsStep();
 }
 
-function updateGenerateRFQsButton() {
-    const btn = document.getElementById('generate-rfqs-btn');
-    if (btn) {
-        // Reset button if RFQs haven't been generated yet or if suppliers changed
+function updateSelectedSuppliersCount() {
+    const count = AppState.selectedSuppliers.length;
+    const summaryEl = document.getElementById('selected-suppliers-count');
+    const modalCountEl = document.getElementById('selected-count-display');
+    
+    if (summaryEl) {
+        summaryEl.textContent = `${count} supplier${count !== 1 ? 's' : ''} selected`;
+    }
+    
+    if (modalCountEl) {
+        modalCountEl.textContent = `${count} selected`;
+    }
+}
+
+function openSupplierModal() {
+    const modal = document.getElementById('supplier-selection-modal');
+    if (!modal) return;
+    
+    // Render suppliers in modal if we have them
+    if (AppState.suppliers && AppState.suppliers.length > 0) {
+        renderSupplierList(AppState.suppliers);
+    }
+    
+    // Restore checkbox states
+    restoreSupplierCheckboxStates();
+    
+    // Update counts
+    updateSelectedSuppliersCount();
+    
+    // Show modal
+    modal.classList.remove('hidden');
+    
+    // Focus search input
+    const searchInput = document.getElementById('supplier-search');
+    if (searchInput) {
+        setTimeout(() => searchInput.focus(), 100);
+    }
+}
+
+function closeSupplierModal() {
+    const modal = document.getElementById('supplier-selection-modal');
+    if (modal) {
+        modal.classList.add('hidden');
+    }
+}
+
+function applySupplierSelection() {
+    // Update summary and close modal
+    updateSelectedSuppliersCount();
+    closeSupplierModal();
+    updateGenerateRFQsStep();
+}
+
+function handleAddNewSupplier() {
+    // Non-functional button - just show a message
+    Helpers.showSuccess('Add New Supplier feature coming soon');
+}
+
+function handleSupplierSearch(event) {
+    const searchTerm = event.target.value.toLowerCase();
+    const suppliers = AppState.suppliers || [];
+    
+    if (!searchTerm) {
+        renderSupplierList(suppliers);
+        return;
+    }
+    
+    const filtered = suppliers.filter(supplier => {
+        const name = (supplier.name || '').toLowerCase();
+        const email = (supplier.email || '').toLowerCase();
+        const contact = (supplier.contact_person || '').toLowerCase();
+        const reason = (supplier.match_reason || '').toLowerCase();
+        
+        return name.includes(searchTerm) || 
+               email.includes(searchTerm) || 
+               contact.includes(searchTerm) || 
+               reason.includes(searchTerm);
+    });
+    
+    renderSupplierList(filtered);
+}
+
+function restoreSupplierCheckboxStates() {
+    // Restore selected states based on AppState.selectedSuppliers
+    const items = document.querySelectorAll('#supplier-list .list-item');
+    items.forEach(item => {
+        const supplierId = item.dataset.supplierId;
+        if (AppState.selectedSuppliers.includes(supplierId)) {
+            item.classList.add('selected');
+        } else {
+            item.classList.remove('selected');
+        }
+    });
+    
+    // Update select all checkbox
+    const selectAllCheckbox = document.getElementById('select-all-suppliers');
+    if (selectAllCheckbox && items.length > 0) {
+        selectAllCheckbox.checked = AppState.selectedSuppliers.length === items.length;
+    }
+}
+
+function updateGenerateRFQsStep() {
+    const step = document.getElementById('step-generate-rfqs');
+    if (step) {
+        // Enable step if suppliers are selected and RFQs haven't been generated yet
         const hasGeneratedRFQs = AppState.rfqs && AppState.rfqs.length > 0;
         
-        if (!hasGeneratedRFQs) {
-            // Reset button to normal state
-            btn.disabled = AppState.selectedSuppliers.length === 0;
-            btn.classList.remove('ms-Button--default');
-            btn.classList.add('ms-Button--primary');
-            const btnLabel = btn.querySelector('.ms-Button-label');
-            if (btnLabel) {
-                btnLabel.textContent = AppState.selectedSuppliers.length > 0
-                    ? `Generate RFQs (${AppState.selectedSuppliers.length})`
-                    : 'Generate RFQs';
-            } else {
-                btn.textContent = AppState.selectedSuppliers.length > 0
-                    ? `Generate RFQs (${AppState.selectedSuppliers.length})`
-                    : 'Generate RFQs';
-            }
-            
-            // Remove success message if it exists
-            const successMsg = document.querySelector('.rfq-generated-message');
-            if (successMsg) {
-                successMsg.remove();
-            }
-        } else {
-            // Keep button in "Generated" state
-            btn.disabled = true;
-            btn.classList.remove('ms-Button--primary');
-            btn.classList.add('ms-Button--default');
-            const btnLabel = btn.querySelector('.ms-Button-label');
-            if (btnLabel) {
-                btnLabel.textContent = 'Generated';
-            } else {
-                btn.textContent = 'Generated';
-            }
+        if (!hasGeneratedRFQs && AppState.selectedSuppliers.length > 0) {
+            Helpers.enableStep(step);
+        } else if (AppState.selectedSuppliers.length === 0) {
+            step.classList.add('disabled');
         }
     }
 }
@@ -3382,18 +3691,17 @@ async function handleGenerateRFQs() {
         
         AppState.rfqs = rfqs;
         
-        // Update the Generate RFQs button to show "Generated" and disable it
-        const generateBtn = document.getElementById('generate-rfqs-btn');
-        if (generateBtn) {
-            generateBtn.disabled = true;
-            generateBtn.classList.remove('ms-Button--primary');
-            generateBtn.classList.add('ms-Button--default');
-            const btnLabel = generateBtn.querySelector('.ms-Button-label');
-            if (btnLabel) {
-                btnLabel.textContent = 'Generated';
-            } else {
-                generateBtn.textContent = 'Generated';
-            }
+        // Disable the Generate RFQs step (mark as completed)
+        const generateStep = document.getElementById('step-generate-rfqs');
+        if (generateStep) {
+            generateStep.classList.add('disabled');
+            // Optionally add a visual indicator that it's completed
+        }
+        
+        // Enable the Review & Send RFQs step
+        const reviewStep = document.getElementById('step-review-rfqs');
+        if (reviewStep) {
+            Helpers.enableStep(reviewStep);
         }
         
         // Clear the RFQ list container and show success message
@@ -3407,43 +3715,6 @@ async function handleGenerateRFQs() {
                     <div style="font-size: 13px; color: #0078d4; font-weight: 500;">Check your Drafts folder in Outlook to review and send them.</div>
                 </div>
             `;
-        }
-        
-        // Add success message above the button
-        const stepContent = document.querySelector('#step-select-suppliers .step-content');
-        if (stepContent) {
-            // Check if success message already exists, remove it first
-            const existingMsg = stepContent.querySelector('.rfq-generated-message');
-            if (existingMsg) {
-                existingMsg.remove();
-            }
-            
-            // Create new success message
-            const successMsg = document.createElement('div');
-            successMsg.className = 'rfq-generated-message';
-            successMsg.style.cssText = 'background-color: #deecf9; border: 1px solid #0078d4; border-radius: 4px; padding: 12px 16px; margin-bottom: 16px; color: #004578;';
-            successMsg.innerHTML = `
-                <div style="display: flex; align-items: flex-start; gap: 10px;">
-                    <span style="font-size: 20px; color: #107c10; flex-shrink: 0;">✓</span>
-                    <div style="flex: 1;">
-                        <div style="font-weight: 600; margin-bottom: 4px; font-size: 14px;">RFQs Generated Successfully</div>
-                        <div style="font-size: 13px; line-height: 1.4;">${rfqs.length} RFQ draft(s) have been created and saved to your <strong>Drafts folder</strong> in Outlook.</div>
-                    </div>
-                </div>
-            `;
-            
-            // Insert before the button
-            const generateBtn = document.getElementById('generate-rfqs-btn');
-            if (generateBtn && generateBtn.parentNode) {
-                generateBtn.parentNode.insertBefore(successMsg, generateBtn);
-            }
-        }
-        
-        // Disable review step (hide it)
-        const reviewStep = document.getElementById('step-review-rfqs');
-        if (reviewStep) {
-            reviewStep.classList.add('disabled');
-            reviewStep.style.display = 'none';
         }
         
         Helpers.showSuccess(`${rfqs.length} RFQ(s) generated successfully`);
