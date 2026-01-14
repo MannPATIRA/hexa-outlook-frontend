@@ -31,7 +31,7 @@ window.OPENAI_API_KEY_ENV = ${openaiKey ? `'${escapedKey}'` : "''"};
 
 // Log for debugging (only in development)
 if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-    console.log('🔑 OpenAI API Key loaded from environment:', openaiKey ? '✅ Set' : '❌ Not set');
+    console.log('🔑 OpenAI API Key loaded from environment:', window.OPENAI_API_KEY_ENV ? '✅ Set' : '❌ Not set');
 }
 `;
 

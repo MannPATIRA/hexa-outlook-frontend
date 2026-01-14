@@ -7,13 +7,9 @@ const Config = {
     // For local development, use http://localhost:8000
     // This will be overridden by localStorage if user configures it in settings
     API_BASE_URL: (() => {
-        // Check if we're in production (not localhost)
-        if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-            // Production: Backend deployed on Render
-            return 'https://hexa-outlook-backend.onrender.com';
-        }
-        // Development: use localhost
-        return 'http://localhost:8000';
+        // Always use deployed backend for both local and production
+        // Users can override this in settings if needed
+        return 'https://hexa-outlook-backend.onrender.com';
     })(),
     API_PREFIX: '/api',
 
