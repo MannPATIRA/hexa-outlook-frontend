@@ -124,55 +124,59 @@
                     <h3>RFQ Progress</h3>
                     
                     <!-- Sent RFQs -->
-                    <div class="progress-item">
+                    <div class="progress-item" id="progress-item-sent">
                         <div class="progress-item-header">
                             <span class="progress-icon"></span>
                             <span class="progress-label">RFQs Sent</span>
                             <span id="sent-rfq-count" class="progress-count">0</span>
                         </div>
                         <div class="progress-bar small">
+                            <div class="progress-bar-label hidden" id="sent-rfq-label"></div>
                             <div id="sent-rfq-progress" class="progress-fill" style="width: 100%; background: #107c10;"></div>
                         </div>
                     </div>
                     
                     <!-- Auto-Replies Scheduled -->
-                    <div class="progress-item">
+                    <div class="progress-item" id="progress-item-scheduled">
                         <div class="progress-item-header">
                             <span class="progress-icon"></span>
                             <span class="progress-label">Auto-Replies Scheduled</span>
                             <span id="auto-replies-scheduled-count" class="progress-count">0</span>
                         </div>
                         <div class="progress-bar small">
+                            <div class="progress-bar-label hidden" id="auto-replies-scheduled-label"></div>
                             <div id="auto-replies-scheduled-progress" class="progress-fill" style="width: 0%; background: #0078d4;"></div>
                         </div>
                     </div>
                     
                     <!-- Replies Received -->
-                    <div class="progress-item">
+                    <div class="progress-item" id="progress-item-received">
                         <div class="progress-item-header">
                             <span class="progress-icon"></span>
                             <span class="progress-label">Replies Received</span>
                             <span id="replies-received-count" class="progress-count">0 / 0</span>
                         </div>
                         <div class="progress-bar small">
+                            <div class="progress-bar-label hidden" id="replies-received-label"></div>
                             <div id="replies-received-progress" class="progress-fill" style="width: 0%; background: #ca5010;"></div>
                         </div>
                     </div>
                     
                     <!-- Replies Sorted -->
-                    <div class="progress-item">
+                    <div class="progress-item" id="progress-item-sorted">
                         <div class="progress-item-header">
                             <span class="progress-icon"></span>
                             <span class="progress-label">Replies Sorted to Folders</span>
                             <span id="replies-sorted-count" class="progress-count">0 / 0</span>
                         </div>
                         <div class="progress-bar small">
+                            <div class="progress-bar-label hidden" id="replies-sorted-label"></div>
                             <div id="replies-sorted-progress" class="progress-fill" style="width: 0%; background: #8764b8;"></div>
                         </div>
                     </div>
                     
                     <!-- Refresh Button -->
-                    <button id="refresh-progress-btn" class="ms-Button ms-Button--default" style="margin-top: 12px;">
+                    <button id="refresh-progress-btn" class="ms-Button ms-Button--default">
                         <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--Refresh"></i></span>
                         <span class="ms-Button-label">Refresh Progress</span>
                     </button>

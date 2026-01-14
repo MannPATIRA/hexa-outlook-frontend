@@ -985,15 +985,67 @@ async function loadRfqProgress(state) {
     const sentCount = state.sentCount || 0;
     const autoRepliesScheduled = state.autoRepliesScheduled || 0;
     
+    // Helper function to update progress bar label
+    const updateProgressLabel = (labelElement, progressElement, value, total = null) => {
+        if (!labelElement || !progressElement) return;
+        
+        const width = parseFloat(progressElement.style.width) || 0;
+        if (width > 10) {
+            // Show label when bar has meaningful width
+            labelElement.classList.remove('hidden');
+            if (total !== null && total > 0) {
+                // Show percentage for items with totals
+                const percentage = Math.round((value / total) * 100);
+                labelElement.textContent = `${percentage}%`;
+            } else {
+                // Show count for items without totals
+                labelElement.textContent = value.toString();
+            }
+        } else {
+            labelElement.classList.add('hidden');
+        }
+    };
+    
+    // Helper function to set progress item state
+    const setProgressItemState = (itemElement, state) => {
+        if (!itemElement) return;
+        itemElement.classList.remove('active', 'completed', 'not-started');
+        itemElement.classList.add(state);
+    };
+    
     // Update sent RFQs
     const sentRfqCount = document.getElementById('sent-rfq-count');
+    const sentRfqProgress = document.getElementById('sent-rfq-progress');
+    const sentRfqLabel = document.getElementById('sent-rfq-label');
+    const sentItem = document.getElementById('progress-item-sent');
+    
     if (sentRfqCount) sentRfqCount.textContent = sentCount.toString();
+    if (sentRfqProgress) {
+        sentRfqProgress.style.width = sentCount > 0 ? '100%' : '0%';
+        updateProgressLabel(sentRfqLabel, sentRfqProgress, sentCount);
+    }
+    
+    // Determine state for RFQs Sent
+    if (sentItem) {
+        if (sentCount > 0) {
+            setProgressItemState(sentItem, 'completed');
+        } else {
+            setProgressItemState(sentItem, 'not-started');
+        }
+    }
     
     // Update auto-replies scheduled
     const scheduledCount = document.getElementById('auto-replies-scheduled-count');
     const scheduledProgress = document.getElementById('auto-replies-scheduled-progress');
+    const scheduledLabel = document.getElementById('auto-replies-scheduled-label');
+    const scheduledItem = document.getElementById('progress-item-scheduled');
+    
     if (scheduledCount) scheduledCount.textContent = autoRepliesScheduled.toString();
-    if (scheduledProgress) scheduledProgress.style.width = '100%';
+    if (scheduledProgress) {
+        const scheduledWidth = sentCount > 0 ? (autoRepliesScheduled / sentCount) * 100 : 0;
+        scheduledProgress.style.width = `${Math.min(100, scheduledWidth)}%`;
+        updateProgressLabel(scheduledLabel, scheduledProgress, autoRepliesScheduled, sentCount);
+    }
     
     // Helper to check if email is an undeliverable/bounceback
     const isUndeliverable = (email) => {
@@ -1107,22 +1159,73 @@ async function loadRfqProgress(state) {
         }
     }
     
+    // Determine state for Auto-Replies Scheduled
+    if (scheduledItem) {
+        if (sentCount > 0 && autoRepliesScheduled === sentCount) {
+            setProgressItemState(scheduledItem, 'completed');
+        } else if (sentCount > 0 && autoRepliesScheduled === 0) {
+            setProgressItemState(scheduledItem, 'active');
+        } else if (sentCount === 0) {
+            setProgressItemState(scheduledItem, 'not-started');
+        } else {
+            setProgressItemState(scheduledItem, 'active');
+        }
+    }
+    
     // Update replies received
     const receivedCount = document.getElementById('replies-received-count');
     const receivedProgress = document.getElementById('replies-received-progress');
+    const receivedLabel = document.getElementById('replies-received-label');
+    const receivedItem = document.getElementById('progress-item-received');
+    
     if (receivedCount) receivedCount.textContent = `${repliesReceived} / ${sentCount}`;
     if (receivedProgress && sentCount > 0) {
-        receivedProgress.style.width = `${Math.min(100, (repliesReceived / sentCount) * 100)}%`;
+        const receivedWidth = (repliesReceived / sentCount) * 100;
+        receivedProgress.style.width = `${Math.min(100, receivedWidth)}%`;
+        updateProgressLabel(receivedLabel, receivedProgress, repliesReceived, sentCount);
+    } else if (receivedProgress) {
+        receivedProgress.style.width = '0%';
+        if (receivedLabel) receivedLabel.classList.add('hidden');
+    }
+    
+    // Determine state for Replies Received
+    if (receivedItem) {
+        if (sentCount > 0 && repliesReceived === sentCount) {
+            setProgressItemState(receivedItem, 'completed');
+        } else if (autoRepliesScheduled > 0 && repliesReceived < sentCount) {
+            setProgressItemState(receivedItem, 'active');
+        } else if (sentCount === 0 || autoRepliesScheduled === 0) {
+            setProgressItemState(receivedItem, 'not-started');
+        } else {
+            setProgressItemState(receivedItem, 'active');
+        }
     }
     
     // Update replies sorted
     const sortedCount = document.getElementById('replies-sorted-count');
     const sortedProgress = document.getElementById('replies-sorted-progress');
+    const sortedLabel = document.getElementById('replies-sorted-label');
+    const sortedItem = document.getElementById('progress-item-sorted');
+    
     if (sortedCount) sortedCount.textContent = `${repliesSorted} / ${repliesReceived}`;
     if (sortedProgress && repliesReceived > 0) {
-        sortedProgress.style.width = `${Math.min(100, (repliesSorted / repliesReceived) * 100)}%`;
-    } else if (sortedProgress && repliesReceived === 0) {
+        const sortedWidth = (repliesSorted / repliesReceived) * 100;
+        sortedProgress.style.width = `${Math.min(100, sortedWidth)}%`;
+        updateProgressLabel(sortedLabel, sortedProgress, repliesSorted, repliesReceived);
+    } else if (sortedProgress) {
         sortedProgress.style.width = '0%';
+        if (sortedLabel) sortedLabel.classList.add('hidden');
+    }
+    
+    // Determine state for Replies Sorted
+    if (sortedItem) {
+        if (repliesReceived > 0 && repliesSorted === repliesReceived) {
+            setProgressItemState(sortedItem, 'completed');
+        } else if (repliesReceived > 0 && repliesSorted < repliesReceived) {
+            setProgressItemState(sortedItem, 'active');
+        } else {
+            setProgressItemState(sortedItem, 'not-started');
+        }
     }
 }
 

@@ -449,20 +449,130 @@ main {
     box-shadow: 0 1px 3px rgba(0,0,0,0.1);
 }
 
+/* ==================== RFQ PROGRESS TRACKER ==================== */
+.rfq-progress-tracker {
+    margin-top: 24px;
+}
+
+.rfq-progress-tracker h3 {
+    margin: 0 0 24px 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: #323130;
+}
+
+/* Progress item states */
+.progress-item {
+    margin-bottom: 16px;
+}
+
+.progress-item-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.progress-icon {
+    width: 16px;
+    height: 16px;
+}
+
+.progress-label {
+    flex: 1;
+    font-size: 14px;
+    color: #323130;
+    transition: color 0.2s ease;
+}
+
+.progress-count {
+    font-size: 14px;
+    font-weight: 600;
+    color: #323130;
+}
+
+/* Active state - current step */
+.progress-item.active .progress-label {
+    font-weight: 600;
+    color: #323130;
+    font-size: 14px;
+}
+
+.progress-item.active .progress-count {
+    color: #0d3d61;
+    font-weight: 700;
+}
+
+/* Completed state - finished steps */
+.progress-item.completed .progress-label {
+    color: #605e5c;
+    font-weight: 400;
+}
+
+.progress-item.completed .progress-count {
+    color: #605e5c;
+    font-weight: 500;
+}
+
+/* Not-started state - future steps */
+.progress-item.not-started {
+    opacity: 0.5;
+}
+
+.progress-item.not-started .progress-label {
+    color: #8a8886;
+    font-weight: 400;
+}
+
+.progress-item.not-started .progress-count {
+    color: #8a8886;
+    font-weight: 400;
+}
+
+/* Refined progress bars */
 .progress-bar {
-    height: 8px;
+    height: 6px;
     background-color: #edebe9;
-    border-radius: 4px;
+    border-radius: 2px;
     overflow: hidden;
     margin-top: 8px;
+    position: relative;
+}
+
+.progress-bar.small {
+    height: 6px;
 }
 
 .progress-fill {
     height: 100%;
     background-color: #0d3d61;
-    border-radius: 4px;
+    border-radius: 2px;
     transition: width 0.3s ease;
     width: 0%;
+    position: relative;
+}
+
+/* Progress bar labels */
+.progress-bar-label {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 11px;
+    font-weight: 600;
+    color: white;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.2);
+    pointer-events: none;
+    z-index: 1;
+    white-space: nowrap;
+}
+
+.progress-bar-label.hidden {
+    display: none;
+}
+
+/* Refresh button spacing */
+#refresh-progress-btn {
+    margin-top: 24px !important;
 }
 
 /* Clarification Mode Specific */
