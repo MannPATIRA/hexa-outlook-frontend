@@ -944,6 +944,9 @@ main {
 
 /* ==================== MATCH SCORE BADGE ==================== */
 .match-score {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 12px;
     font-size: 12px;
     font-weight: 600;
     color: #323130;
