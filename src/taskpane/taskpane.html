@@ -609,6 +609,93 @@
             </div>
         </div>
 
+        <!-- Quote Comparison Modal -->
+        <div id="quote-comparison-modal" class="modal-overlay hidden">
+            <div class="modal-container quote-comparison-modal-container">
+                <div class="modal-header">
+                    <h2>Quote Comparison</h2>
+                    <button id="close-quote-comparison-modal" class="ms-Button ms-Button--icon">
+                        <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--Cancel"></i></span>
+                    </button>
+                </div>
+                
+                <div class="modal-toolbar">
+                    <div class="toolbar-left">
+                        <div class="search-filter-group">
+                            <input type="text" id="quote-search-input" class="ms-TextField-field" placeholder="Search suppliers..." />
+                        </div>
+                        <div class="sort-filter-group">
+                            <label for="quote-sort-select">Sort by:</label>
+                            <select id="quote-sort-select" class="ms-Dropdown-select">
+                                <option value="unit_price_asc">Price (Low to High)</option>
+                                <option value="unit_price_desc">Price (High to Low)</option>
+                                <option value="total_price_asc">Total Price (Low to High)</option>
+                                <option value="delivery_asc">Delivery Time (Fastest)</option>
+                                <option value="supplier_asc">Supplier Name (A-Z)</option>
+                                <option value="date_desc">Quote Date (Newest)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="toolbar-right">
+                        <div class="quick-filters">
+                            <button id="filter-best-price" class="ms-Button ms-Button--default filter-btn">
+                                <span class="ms-Button-label">Best Price</span>
+                            </button>
+                            <button id="filter-fastest-delivery" class="ms-Button ms-Button--default filter-btn">
+                                <span class="ms-Button-label">Fastest Delivery</span>
+                            </button>
+                            <button id="clear-filters" class="ms-Button ms-Button--default filter-btn">
+                                <span class="ms-Button-label">Clear Filters</span>
+                            </button>
+                        </div>
+                        <div class="export-group">
+                            <button id="export-csv-btn" class="ms-Button ms-Button--default">
+                                <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--Download"></i></span>
+                                <span class="ms-Button-label">Export CSV</span>
+                            </button>
+                            <button id="export-pdf-btn" class="ms-Button ms-Button--default">
+                                <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--PDF"></i></span>
+                                <span class="ms-Button-label">Export PDF</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="modal-content quote-comparison-content">
+                    <div id="quote-summary-cards" class="summary-cards-grid">
+                        <!-- Summary cards will be inserted here -->
+                    </div>
+                    
+                    <div id="quote-comparison-table-container" class="comparison-table-container">
+                        <div id="quote-comparison-loading" class="loading-indicator">
+                            <div class="spinner-small"></div>
+                            <span>Loading quotes...</span>
+                        </div>
+                        <div id="quote-comparison-table-wrapper" class="comparison-table-wrapper hidden">
+                            <!-- Comparison table will be inserted here -->
+                        </div>
+                        <div id="quote-comparison-empty" class="empty-state hidden">
+                            <p>No quotes found. Try adjusting your filters.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="modal-footer">
+                    <div class="modal-footer-left">
+                        <span id="quote-count-display" class="quote-count-text">0 quotes</span>
+                    </div>
+                    <div class="modal-footer-right">
+                        <button id="accept-quote-from-modal" class="ms-Button ms-Button--primary">
+                            <span class="ms-Button-label">Accept Selected Quote</span>
+                        </button>
+                        <button id="close-quote-comparison-modal-footer" class="ms-Button ms-Button--default">
+                            <span class="ms-Button-label">Close</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
     </div>
 
     <!-- JavaScript Files -->

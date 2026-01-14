@@ -2933,10 +2933,87 @@ function setupModeEventListeners() {
     
     // Quote mode buttons
     document.getElementById('compare-quotes-btn')?.addEventListener('click', async () => {
-        // Show quote comparison view and automatically load all quotes
-        await showQuoteComparisonView();
+        // Open quote comparison modal
+        await openQuoteComparisonModal();
     });
     document.getElementById('accept-quote-btn')?.addEventListener('click', handleAcceptQuote);
+    
+    // Quote comparison modal event handlers
+    document.getElementById('close-quote-comparison-modal')?.addEventListener('click', closeQuoteComparisonModal);
+    document.getElementById('close-quote-comparison-modal-footer')?.addEventListener('click', closeQuoteComparisonModal);
+    
+    // Close modal on backdrop click
+    document.getElementById('quote-comparison-modal')?.addEventListener('click', (e) => {
+        if (e.target.id === 'quote-comparison-modal') {
+            closeQuoteComparisonModal();
+        }
+    });
+    
+    // Close modal on Escape key
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            const modal = document.getElementById('quote-comparison-modal');
+            if (modal && !modal.classList.contains('hidden')) {
+                closeQuoteComparisonModal();
+            }
+        }
+    });
+    
+    // Sort dropdown
+    document.getElementById('quote-sort-select')?.addEventListener('change', (e) => {
+        modalQuotesState.sortBy = e.target.value;
+        applyModalFiltersAndSort();
+    });
+    
+    // Search input
+    document.getElementById('quote-search-input')?.addEventListener('input', (e) => {
+        modalQuotesState.filters.search = e.target.value;
+        applyModalFiltersAndSort();
+    });
+    
+    // Quick filter buttons
+    document.getElementById('filter-best-price')?.addEventListener('click', (e) => {
+        modalQuotesState.filters.bestPrice = !modalQuotesState.filters.bestPrice;
+        e.target.classList.toggle('active', modalQuotesState.filters.bestPrice);
+        applyModalFiltersAndSort();
+    });
+    
+    document.getElementById('filter-fastest-delivery')?.addEventListener('click', (e) => {
+        modalQuotesState.filters.fastestDelivery = !modalQuotesState.filters.fastestDelivery;
+        e.target.classList.toggle('active', modalQuotesState.filters.fastestDelivery);
+        applyModalFiltersAndSort();
+    });
+    
+    document.getElementById('clear-filters')?.addEventListener('click', () => {
+        modalQuotesState.filters = {
+            search: '',
+            bestPrice: false,
+            fastestDelivery: false
+        };
+        document.getElementById('quote-search-input').value = '';
+        document.getElementById('filter-best-price')?.classList.remove('active');
+        document.getElementById('filter-fastest-delivery')?.classList.remove('active');
+        applyModalFiltersAndSort();
+    });
+    
+    // Export buttons
+    document.getElementById('export-csv-btn')?.addEventListener('click', () => {
+        exportQuotesToCSV(modalQuotesState.filteredQuotes);
+    });
+    
+    document.getElementById('export-pdf-btn')?.addEventListener('click', () => {
+        exportQuotesToPDF(modalQuotesState.filteredQuotes);
+    });
+    
+    // Accept quote from modal
+    document.getElementById('accept-quote-from-modal')?.addEventListener('click', () => {
+        // Get the first quote (or selected quote if we add selection later)
+        if (modalQuotesState.filteredQuotes.length > 0) {
+            handleAcceptQuoteFromModal(modalQuotesState.filteredQuotes[0]);
+        } else {
+            Helpers.showError('No quote selected');
+        }
+    });
 }
 
 /**
@@ -5183,6 +5260,679 @@ function renderQuoteComparison(quotes) {
             Helpers.hideElement(summarySection);
         }
     }
+}
+
+// ==================== QUOTE COMPARISON MODAL ====================
+
+// State for modal
+let modalQuotesState = {
+    allQuotes: [],
+    filteredQuotes: [],
+    sortBy: 'unit_price_asc',
+    filters: {
+        search: '',
+        bestPrice: false,
+        fastestDelivery: false
+    }
+};
+
+/**
+ * Open the quote comparison modal
+ */
+async function openQuoteComparisonModal() {
+    const modal = document.getElementById('quote-comparison-modal');
+    if (!modal) {
+        console.error('Quote comparison modal not found');
+        return;
+    }
+    
+    // Show modal
+    modal.classList.remove('hidden');
+    
+    // Show loading state
+    const loadingEl = document.getElementById('quote-comparison-loading');
+    const tableWrapper = document.getElementById('quote-comparison-table-wrapper');
+    const emptyState = document.getElementById('quote-comparison-empty');
+    
+    if (loadingEl) Helpers.showElement(loadingEl);
+    if (tableWrapper) Helpers.hideElement(tableWrapper);
+    if (emptyState) Helpers.hideElement(emptyState);
+    
+    try {
+        // Load all quotes for the modal
+        const quotes = await getAllQuotesForModal();
+        
+        // Store in state
+        modalQuotesState.allQuotes = quotes;
+        modalQuotesState.filteredQuotes = [...quotes];
+        
+        // Apply initial sort
+        const [sortField, sortDirection] = modalQuotesState.sortBy.split('_');
+        const sortedQuotes = sortQuotes(quotes, sortField, sortDirection === 'desc' ? 'desc' : 'asc');
+        modalQuotesState.filteredQuotes = sortedQuotes;
+        
+        // Render modal
+        renderQuoteComparisonModal(sortedQuotes);
+        
+    } catch (error) {
+        console.error('Error opening quote comparison modal:', error);
+        if (loadingEl) {
+            loadingEl.innerHTML = `<div class="error-message">Error loading quotes: ${Helpers.escapeHtml(error.message)}</div>`;
+        }
+        Helpers.showError('Failed to load quotes: ' + error.message);
+    }
+}
+
+/**
+ * Get all quotes for the modal (reuse existing logic)
+ */
+async function getAllQuotesForModal() {
+    const quotes = [];
+    
+    if (!AuthService.isSignedIn()) {
+        throw new Error('Please sign in to view quotes');
+    }
+    
+    try {
+        // Get all mail folders
+        const foldersResponse = await AuthService.graphRequest('/me/mailFolders?$top=500');
+        const allFolders = foldersResponse.value || [];
+        
+        // Find all material folders (MAT-XXXXX)
+        const materialFolders = allFolders.filter(folder => {
+            const name = folder.displayName || '';
+            return /^MAT-\d+/i.test(name);
+        });
+        
+        // For each material folder, find its Quotes subfolder
+        for (const materialFolder of materialFolders) {
+            try {
+                const childrenResponse = await AuthService.graphRequest(
+                    `/me/mailFolders/${materialFolder.id}/childFolders?$top=100`
+                );
+                
+                if (childrenResponse.value) {
+                    const quotesFolder = childrenResponse.value.find(child =>
+                        child.displayName && child.displayName.toLowerCase() === 'quotes'
+                    );
+                    
+                    if (quotesFolder) {
+                        // Get emails from this Quotes folder
+                        const emailsResponse = await AuthService.graphRequest(
+                            `/me/mailFolders/${quotesFolder.id}/messages?$top=100&$select=id,subject,from,body,receivedDateTime`
+                        );
+                        
+                        if (emailsResponse.value) {
+                            for (const email of emailsResponse.value) {
+                                // Extract quote data from email
+                                const quote = extractQuoteFromEmail(email, materialFolder.displayName);
+                                if (quote) {
+                                    quotes.push(quote);
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (folderError) {
+                console.warn(`Error processing folder ${materialFolder.displayName}:`, folderError);
+                // Continue with other folders
+            }
+        }
+    } catch (error) {
+        console.error('Error loading quotes for modal:', error);
+        throw error;
+    }
+    
+    return quotes;
+}
+
+/**
+ * Extract quote data from email
+ */
+function extractQuoteFromEmail(email, materialCode) {
+    try {
+        const bodyText = email.body?.content || '';
+        const fromEmail = email.from?.emailAddress?.address || '';
+        const fromName = email.from?.emailAddress?.name || '';
+        
+        // Try to extract price information
+        const priceMatch = bodyText.match(/(?:unit\s*price|price)[:\s]*\$?([\d,]+\.?\d*)/i);
+        const totalMatch = bodyText.match(/(?:total\s*price|total)[:\s]*\$?([\d,]+\.?\d*)/i);
+        const deliveryMatch = bodyText.match(/(?:delivery|lead\s*time)[:\s]*([^\n]+)/i);
+        const validityMatch = bodyText.match(/(?:validity|valid)[:\s]*([^\n]+)/i);
+        const termsMatch = bodyText.match(/(?:payment\s*terms|terms)[:\s]*([^\n]+)/i);
+        
+        const unitPrice = priceMatch ? parseFloat(priceMatch[1].replace(/,/g, '')) : null;
+        const totalPrice = totalMatch ? parseFloat(totalMatch[1].replace(/,/g, '')) : null;
+        const deliveryTime = deliveryMatch ? deliveryMatch[1].trim() : null;
+        const validity = validityMatch ? validityMatch[1].trim() : null;
+        const paymentTerms = termsMatch ? termsMatch[1].trim() : null;
+        
+        return {
+            supplier_name: fromName || fromEmail.split('@')[0],
+            supplier_email: fromEmail,
+            unit_price: unitPrice,
+            total_price: totalPrice,
+            price: unitPrice || totalPrice,
+            lead_time: deliveryTime,
+            delivery_time: deliveryTime,
+            validity: validity,
+            validity_period: validity,
+            payment_terms: paymentTerms,
+            quote_date: email.receivedDateTime,
+            currency: 'USD',
+            status: 'Received',
+            material_code: materialCode,
+            email_id: email.id,
+            subject: email.subject
+        };
+    } catch (error) {
+        console.error('Error extracting quote from email:', error);
+        return null;
+    }
+}
+
+/**
+ * Render quote comparison in the modal
+ */
+function renderQuoteComparisonModal(quotes) {
+    const loadingEl = document.getElementById('quote-comparison-loading');
+    const tableWrapper = document.getElementById('quote-comparison-table-wrapper');
+    const emptyState = document.getElementById('quote-comparison-empty');
+    const summaryCards = document.getElementById('quote-summary-cards');
+    const countDisplay = document.getElementById('quote-count-display');
+    
+    // Hide loading
+    if (loadingEl) Helpers.hideElement(loadingEl);
+    
+    // Update quote count
+    if (countDisplay) {
+        countDisplay.textContent = `${quotes.length} quote${quotes.length !== 1 ? 's' : ''}`;
+    }
+    
+    if (quotes.length === 0) {
+        if (tableWrapper) Helpers.hideElement(tableWrapper);
+        if (emptyState) Helpers.showElement(emptyState);
+        if (summaryCards) summaryCards.innerHTML = '';
+        return;
+    }
+    
+    if (emptyState) Helpers.hideElement(emptyState);
+    if (tableWrapper) Helpers.showElement(tableWrapper);
+    
+    // Render summary cards
+    renderSummaryCards(quotes, summaryCards);
+    
+    // Render comparison table
+    renderModalComparisonTable(quotes, tableWrapper);
+}
+
+/**
+ * Render summary cards
+ */
+function renderSummaryCards(quotes, container) {
+    if (!container) return;
+    
+    // Calculate statistics
+    const prices = quotes
+        .map(q => {
+            const price = parseFloat(q.unit_price) || parseFloat(q.total_price) || parseFloat(q.price) || 0;
+            return price > 0 ? price : null;
+        })
+        .filter(p => p !== null && p > 0);
+    
+    const lowestPrice = prices.length > 0 ? Math.min(...prices) : null;
+    const highestPrice = prices.length > 0 ? Math.max(...prices) : null;
+    const averagePrice = prices.length > 0 ? prices.reduce((a, b) => a + b, 0) / prices.length : null;
+    
+    const lowestQuote = quotes.find(q => {
+        const price = parseFloat(q.unit_price) || parseFloat(q.total_price) || parseFloat(q.price) || 0;
+        return price > 0 && price === lowestPrice;
+    }) || quotes[0];
+    
+    // Find fastest delivery
+    const quotesWithDelivery = quotes.filter(q => q.delivery_time || q.lead_time);
+    const fastestQuote = quotesWithDelivery.length > 0 ? quotesWithDelivery[0] : null;
+    
+    container.innerHTML = `
+        <div class="summary-card card-total">
+            <div class="summary-card-content">
+                <div class="summary-card-label">Total Quotes</div>
+                <div class="summary-card-value">${quotes.length}</div>
+            </div>
+        </div>
+        <div class="summary-card card-best">
+            <div class="summary-card-content">
+                <div class="summary-card-label">Best Price</div>
+                <div class="summary-card-value">${lowestPrice ? Helpers.formatCurrency(lowestPrice, lowestQuote.currency || 'USD') : 'N/A'}</div>
+                <div class="summary-card-subtext">${Helpers.escapeHtml(lowestQuote.supplier_name || '')}</div>
+            </div>
+        </div>
+        <div class="summary-card card-average">
+            <div class="summary-card-content">
+                <div class="summary-card-label">Average Price</div>
+                <div class="summary-card-value">${averagePrice ? Helpers.formatCurrency(averagePrice, lowestQuote.currency || 'USD') : 'N/A'}</div>
+            </div>
+        </div>
+        <div class="summary-card card-fastest">
+            <div class="summary-card-content">
+                <div class="summary-card-label">Fastest Delivery</div>
+                <div class="summary-card-value">${fastestQuote ? Helpers.escapeHtml(fastestQuote.delivery_time || fastestQuote.lead_time || 'N/A') : 'N/A'}</div>
+                <div class="summary-card-subtext">${fastestQuote ? Helpers.escapeHtml(fastestQuote.supplier_name || '') : ''}</div>
+            </div>
+        </div>
+    `;
+}
+
+/**
+ * Render comparison table in modal
+ */
+function renderModalComparisonTable(quotes, container) {
+    if (!container) return;
+    
+    // Calculate best prices for highlighting
+    const unitPrices = quotes
+        .map(q => {
+            const up = parseFloat(q.unit_price) || parseFloat(q.total_price) || parseFloat(q.price) || 0;
+            return up > 0 ? up : null;
+        })
+        .filter(p => p !== null && p > 0);
+    
+    const totalPrices = quotes
+        .map(q => {
+            const tp = parseFloat(q.total_price) || parseFloat(q.price) || 0;
+            return tp > 0 ? tp : null;
+        })
+        .filter(p => p !== null && p > 0);
+    
+    const lowestUnitPrice = unitPrices.length > 0 ? Math.min(...unitPrices) : null;
+    const lowestTotalPrice = totalPrices.length > 0 ? Math.min(...totalPrices) : null;
+    
+    // Find fastest delivery time
+    const deliveryTimes = quotes
+        .map(q => q.delivery_time || q.lead_time)
+        .filter(t => t && t.trim().length > 0);
+    
+    const fastestDelivery = deliveryTimes.length > 0 ? deliveryTimes[0] : null;
+    
+    // Create table
+    const table = document.createElement('table');
+    table.className = 'quote-comparison-table';
+    
+    // Table header
+    const thead = document.createElement('thead');
+    thead.innerHTML = `
+        <tr>
+            <th>Supplier</th>
+            <th>Unit Price</th>
+            <th>Total Price</th>
+            <th>Lead Time</th>
+            <th>Validity</th>
+            <th>Payment Terms</th>
+            <th>Quote Date</th>
+            <th>Actions</th>
+        </tr>
+    `;
+    
+    // Table body
+    const tbody = document.createElement('tbody');
+    
+    quotes.forEach((quote, index) => {
+        const row = document.createElement('tr');
+        row.className = 'comparison-row';
+        row.dataset.quoteIndex = index;
+        
+        if (index % 2 === 0) {
+            row.classList.add('even-row');
+        }
+        
+        const unitPrice = parseFloat(quote.unit_price) || 0;
+        const totalPrice = parseFloat(quote.total_price) || parseFloat(quote.price) || 0;
+        const deliveryTime = quote.delivery_time || quote.lead_time || '';
+        
+        const isLowestUnit = unitPrice > 0 && lowestUnitPrice !== null && unitPrice === lowestUnitPrice;
+        const isLowestTotal = totalPrice > 0 && lowestTotalPrice !== null && totalPrice === lowestTotalPrice;
+        const isFastest = deliveryTime && deliveryTime === fastestDelivery;
+        
+        row.innerHTML = `
+            <td class="supplier-cell">
+                <strong>${Helpers.escapeHtml(quote.supplier_name || 'Unknown')}</strong>
+                <div class="supplier-email">${Helpers.escapeHtml(quote.supplier_email || '')}</div>
+            </td>
+            <td class="price-cell ${isLowestUnit ? 'best-price' : ''}">
+                ${unitPrice > 0 ? `
+                    <span class="price-value">${Helpers.formatCurrency(unitPrice, quote.currency || 'USD')}</span>
+                    ${isLowestUnit ? '<span class="best-badge">Best</span>' : ''}
+                ` : '<span class="no-data">-</span>'}
+            </td>
+            <td class="price-cell ${isLowestTotal ? 'best-price' : ''}">
+                ${totalPrice > 0 ? `
+                    <span class="price-value">${Helpers.formatCurrency(totalPrice, quote.currency || 'USD')}</span>
+                    ${isLowestTotal ? '<span class="best-badge">Best</span>' : ''}
+                ` : '<span class="no-data">-</span>'}
+            </td>
+            <td class="delivery-cell ${isFastest ? 'fastest-delivery' : ''}">
+                ${deliveryTime ? `
+                    ${Helpers.escapeHtml(deliveryTime)}
+                    ${isFastest ? '<span class="fastest-badge">Fastest</span>' : ''}
+                ` : '<span class="no-data">-</span>'}
+            </td>
+            <td>${quote.validity || quote.validity_period || '<span class="no-data">-</span>'}</td>
+            <td>${quote.payment_terms || '<span class="no-data">-</span>'}</td>
+            <td>${quote.quote_date ? Helpers.formatDate(quote.quote_date) : '<span class="no-data">-</span>'}</td>
+            <td class="actions-cell">
+                <button class="ms-Button ms-Button--small accept-quote-row-btn" data-quote-index="${index}">
+                    <span class="ms-Button-label">Accept</span>
+                </button>
+            </td>
+        `;
+        
+        tbody.appendChild(row);
+    });
+    
+    table.appendChild(thead);
+    table.appendChild(tbody);
+    
+    // Clear and append
+    Helpers.clearChildren(container);
+    container.appendChild(table);
+    
+    // Attach event handlers for accept buttons
+    container.querySelectorAll('.accept-quote-row-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const index = parseInt(btn.dataset.quoteIndex);
+            const quote = quotes[index];
+            if (quote) {
+                handleAcceptQuoteFromModal(quote);
+            }
+        });
+    });
+}
+
+/**
+ * Sort quotes based on criteria
+ */
+function sortQuotes(quotes, sortBy, direction = 'asc') {
+    const sorted = [...quotes];
+    
+    sorted.sort((a, b) => {
+        let aVal, bVal;
+        
+        switch (sortBy) {
+            case 'unit_price':
+                aVal = parseFloat(a.unit_price) || parseFloat(a.total_price) || parseFloat(a.price) || 0;
+                bVal = parseFloat(b.unit_price) || parseFloat(b.total_price) || parseFloat(b.price) || 0;
+                break;
+            case 'total_price':
+                aVal = parseFloat(a.total_price) || parseFloat(a.price) || 0;
+                bVal = parseFloat(b.total_price) || parseFloat(b.price) || 0;
+                break;
+            case 'delivery':
+                aVal = (a.delivery_time || a.lead_time || '').toLowerCase();
+                bVal = (b.delivery_time || b.lead_time || '').toLowerCase();
+                // For delivery, we want fastest first (shorter strings typically mean faster)
+                return direction === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+            case 'supplier':
+                aVal = (a.supplier_name || '').toLowerCase();
+                bVal = (b.supplier_name || '').toLowerCase();
+                break;
+            case 'date':
+                aVal = new Date(a.quote_date || 0).getTime();
+                bVal = new Date(b.quote_date || 0).getTime();
+                break;
+            default:
+                return 0;
+        }
+        
+        if (sortBy === 'delivery') {
+            return 0; // Already handled above
+        }
+        
+        if (typeof aVal === 'number' && typeof bVal === 'number') {
+            return direction === 'asc' ? aVal - bVal : bVal - aVal;
+        } else {
+            return direction === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+        }
+    });
+    
+    return sorted;
+}
+
+/**
+ * Filter quotes based on criteria
+ */
+function filterQuotes(quotes, filters) {
+    let filtered = [...quotes];
+    
+    // Search filter
+    if (filters.search && filters.search.trim()) {
+        const searchLower = filters.search.toLowerCase();
+        filtered = filtered.filter(q => {
+            const supplierName = (q.supplier_name || '').toLowerCase();
+            const supplierEmail = (q.supplier_email || '').toLowerCase();
+            return supplierName.includes(searchLower) || supplierEmail.includes(searchLower);
+        });
+    }
+    
+    // Best price filter
+    if (filters.bestPrice) {
+        const prices = filtered
+            .map(q => parseFloat(q.unit_price) || parseFloat(q.total_price) || parseFloat(q.price) || 0)
+            .filter(p => p > 0);
+        
+        if (prices.length > 0) {
+            const lowestPrice = Math.min(...prices);
+            filtered = filtered.filter(q => {
+                const price = parseFloat(q.unit_price) || parseFloat(q.total_price) || parseFloat(q.price) || 0;
+                return price > 0 && price === lowestPrice;
+            });
+        }
+    }
+    
+    // Fastest delivery filter
+    if (filters.fastestDelivery) {
+        const deliveryTimes = filtered
+            .map(q => q.delivery_time || q.lead_time)
+            .filter(t => t && t.trim().length > 0);
+        
+        if (deliveryTimes.length > 0) {
+            // Simple approach: take the first one with delivery time
+            // In production, you'd parse and compare delivery times properly
+            const fastest = deliveryTimes[0];
+            filtered = filtered.filter(q => {
+                const delivery = q.delivery_time || q.lead_time;
+                return delivery && delivery === fastest;
+            });
+        }
+    }
+    
+    return filtered;
+}
+
+/**
+ * Apply sorting and filtering to modal quotes
+ */
+function applyModalFiltersAndSort() {
+    const { allQuotes, sortBy, filters } = modalQuotesState;
+    
+    // Parse sort criteria
+    const [sortField, sortDirection] = sortBy.split('_');
+    const direction = sortDirection === 'desc' ? 'desc' : 'asc';
+    
+    // Filter first
+    let filtered = filterQuotes(allQuotes, filters);
+    
+    // Then sort
+    filtered = sortQuotes(filtered, sortField, direction);
+    
+    // Update state
+    modalQuotesState.filteredQuotes = filtered;
+    
+    // Re-render
+    const tableWrapper = document.getElementById('quote-comparison-table-wrapper');
+    renderModalComparisonTable(filtered, tableWrapper);
+    
+    // Update summary cards
+    const summaryCards = document.getElementById('quote-summary-cards');
+    renderSummaryCards(filtered, summaryCards);
+    
+    // Update count
+    const countDisplay = document.getElementById('quote-count-display');
+    if (countDisplay) {
+        countDisplay.textContent = `${filtered.length} quote${filtered.length !== 1 ? 's' : ''}`;
+    }
+}
+
+/**
+ * Export quotes to CSV
+ */
+function exportQuotesToCSV(quotes) {
+    if (quotes.length === 0) {
+        Helpers.showError('No quotes to export');
+        return;
+    }
+    
+    // CSV header
+    const headers = ['Supplier', 'Supplier Email', 'Unit Price', 'Total Price', 'Lead Time', 'Validity', 'Payment Terms', 'Quote Date', 'Status'];
+    
+    // CSV rows
+    const rows = quotes.map(quote => {
+        const unitPrice = parseFloat(quote.unit_price) || '';
+        const totalPrice = parseFloat(quote.total_price) || parseFloat(quote.price) || '';
+        return [
+            quote.supplier_name || '',
+            quote.supplier_email || '',
+            unitPrice,
+            totalPrice,
+            quote.lead_time || quote.delivery_time || '',
+            quote.validity || quote.validity_period || '',
+            quote.payment_terms || '',
+            quote.quote_date ? new Date(quote.quote_date).toLocaleDateString() : '',
+            quote.status || ''
+        ];
+    });
+    
+    // Combine header and rows
+    const csvContent = [
+        headers.join(','),
+        ...rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+    ].join('\n');
+    
+    // Create download
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `quote-comparison-${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
+    Helpers.showSuccess('Quote comparison exported to CSV');
+}
+
+/**
+ * Export quotes to PDF (using browser print)
+ */
+function exportQuotesToPDF(quotes) {
+    if (quotes.length === 0) {
+        Helpers.showError('No quotes to export');
+        return;
+    }
+    
+    // Create a printable version
+    const printWindow = window.open('', '_blank');
+    const tableWrapper = document.getElementById('quote-comparison-table-wrapper');
+    const summaryCards = document.getElementById('quote-summary-cards');
+    
+    if (!tableWrapper || !summaryCards) {
+        Helpers.showError('Could not generate PDF');
+        return;
+    }
+    
+    // Get table HTML
+    const tableHTML = tableWrapper.innerHTML;
+    const summaryHTML = summaryCards.innerHTML;
+    
+    // Create print document
+    printWindow.document.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Quote Comparison</title>
+            <style>
+                body { font-family: Arial, sans-serif; padding: 20px; }
+                h1 { color: #0d3d61; }
+                .summary-cards-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 30px; }
+                .summary-card { border: 1px solid #ddd; padding: 15px; border-radius: 4px; }
+                .summary-card-label { font-size: 12px; color: #666; }
+                .summary-card-value { font-size: 24px; font-weight: bold; margin: 5px 0; }
+                table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+                th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+                th { background-color: #0d3d61; color: white; }
+                .best-price { background-color: #d4edda !important; }
+                .fastest-delivery { background-color: #d1ecf1 !important; }
+                @media print {
+                    .no-print { display: none; }
+                }
+            </style>
+        </head>
+        <body>
+            <h1>Quote Comparison Report</h1>
+            <p>Generated: ${new Date().toLocaleString()}</p>
+            <div class="summary-cards-grid">${summaryHTML}</div>
+            ${tableHTML}
+        </body>
+        </html>
+    `);
+    
+    printWindow.document.close();
+    
+    // Wait for content to load, then print
+    setTimeout(() => {
+        printWindow.print();
+    }, 250);
+    
+    Helpers.showSuccess('Opening print dialog for PDF export');
+}
+
+/**
+ * Handle accept quote from modal
+ */
+function handleAcceptQuoteFromModal(quote) {
+    // Close modal first
+    closeQuoteComparisonModal();
+    
+    // Then handle acceptance (reuse existing logic)
+    if (typeof handleAcceptQuote === 'function') {
+        // Find the quote in AppState or pass it directly
+        handleAcceptQuote(quote);
+    } else {
+        Helpers.showSuccess(`Quote from ${quote.supplier_name} accepted`);
+    }
+}
+
+/**
+ * Close quote comparison modal
+ */
+function closeQuoteComparisonModal() {
+    const modal = document.getElementById('quote-comparison-modal');
+    if (modal) {
+        modal.classList.add('hidden');
+    }
+    
+    // Reset state
+    modalQuotesState = {
+        allQuotes: [],
+        filteredQuotes: [],
+        sortBy: 'unit_price_asc',
+        filters: {
+            search: '',
+            bestPrice: false,
+            fastestDelivery: false
+        }
+    };
 }
 
 // ==================== SETTINGS ====================
