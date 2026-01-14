@@ -4872,8 +4872,18 @@ function closeSettingsModal() {
 function saveSettings() {
     const isPinned = document.getElementById('pin-taskpane').checked;
     
+    let apiUrl = document.getElementById('api-url').value.trim();
+    
+    // Prevent localhost URLs - always use production
+    if (apiUrl.includes('localhost') || apiUrl.includes('127.0.0.1')) {
+        showError('Cannot use localhost URL. Using production backend URL instead.');
+        // Reset to production URL
+        apiUrl = 'https://hexa-outlook-backend.onrender.com';
+        document.getElementById('api-url').value = apiUrl;
+    }
+    
     const settings = {
-        apiUrl: document.getElementById('api-url').value,
+        apiUrl: apiUrl,
         engineeringEmail: document.getElementById('engineering-email').value,
         autoClassify: document.getElementById('auto-classify').checked,
         autoCreateFolders: document.getElementById('auto-create-folders').checked

@@ -4,12 +4,20 @@
  */
 
 // API Configuration (duplicated here for standalone usage)
-// Always use deployed backend for both local and production
+// ALWAYS use deployed backend - NEVER use localhost
 const getApiBaseUrl = () => {
     const stored = localStorage.getItem('procurement_api_url');
-    if (stored) return stored;
+    // Only use stored URL if it's not localhost
+    if (stored && !stored.includes('localhost') && !stored.includes('127.0.0.1')) {
+        return stored;
+    }
+    // If stored URL is localhost, ignore it and use production
+    if (stored && (stored.includes('localhost') || stored.includes('127.0.0.1'))) {
+        console.warn('Ignoring localhost URL, using production URL');
+        localStorage.removeItem('procurement_api_url');
+    }
     
-    // Always use deployed backend
+    // Always use deployed backend - never localhost
     return 'https://hexa-outlook-backend.onrender.com';
 };
 const API_BASE_URL = getApiBaseUrl();

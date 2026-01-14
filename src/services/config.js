@@ -2,13 +2,10 @@
  * Configuration settings for the Procurement Workflow Add-in
  */
 const Config = {
-    // Backend API URL - change this for different environments
-    // For production, set this to your deployed backend URL (e.g., https://your-backend.railway.app)
-    // For local development, use http://localhost:8000
-    // This will be overridden by localStorage if user configures it in settings
+    // Backend API URL - ALWAYS use deployed backend URL
+    // NEVER use localhost - always use production URL
     API_BASE_URL: (() => {
-        // Always use deployed backend for both local and production
-        // Users can override this in settings if needed
+        // Always use deployed backend - never localhost
         return 'https://hexa-outlook-backend.onrender.com';
     })(),
     API_PREFIX: '/api',
@@ -71,7 +68,16 @@ const Config = {
     loadSettings() {
         try {
             const apiUrl = localStorage.getItem(this.STORAGE_KEYS.API_URL);
-            if (apiUrl) this.API_BASE_URL = apiUrl;
+            // Only use stored URL if it's not localhost - always prefer production
+            if (apiUrl && !apiUrl.includes('localhost') && !apiUrl.includes('127.0.0.1')) {
+                this.API_BASE_URL = apiUrl;
+            }
+            // If stored URL is localhost, ignore it and use production default
+            else if (apiUrl && (apiUrl.includes('localhost') || apiUrl.includes('127.0.0.1'))) {
+                console.warn('Ignoring localhost URL from localStorage, using production URL');
+                // Clear the localhost URL from storage
+                localStorage.removeItem(this.STORAGE_KEYS.API_URL);
+            }
 
             const engineeringEmail = localStorage.getItem(this.STORAGE_KEYS.ENGINEERING_EMAIL);
             if (engineeringEmail) this.ENGINEERING_EMAIL = engineeringEmail;
@@ -84,8 +90,14 @@ const Config = {
     saveSettings(settings) {
         try {
             if (settings.apiUrl) {
-                this.API_BASE_URL = settings.apiUrl;
-                localStorage.setItem(this.STORAGE_KEYS.API_URL, settings.apiUrl);
+                // Prevent saving localhost URLs - always use production
+                if (settings.apiUrl.includes('localhost') || settings.apiUrl.includes('127.0.0.1')) {
+                    console.warn('Cannot save localhost URL. Using production URL instead.');
+                    // Don't save localhost, but continue to save other settings
+                } else {
+                    this.API_BASE_URL = settings.apiUrl;
+                    localStorage.setItem(this.STORAGE_KEYS.API_URL, settings.apiUrl);
+                }
             }
             if (settings.engineeringEmail) {
                 this.ENGINEERING_EMAIL = settings.engineeringEmail;
