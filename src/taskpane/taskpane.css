@@ -44,8 +44,9 @@ body {
 .app-logo {
     height: 36px;
     width: auto;
-    filter: brightness(0) invert(1);
+    /* Removed filter to show logo in natural colors */
     transition: transform 0.3s ease;
+    object-fit: contain;
 }
 
 .app-logo:hover {
