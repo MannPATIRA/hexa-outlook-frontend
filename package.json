@@ -11,14 +11,16 @@
     "validate": "office-addin-manifest validate manifest.xml",
     "dev-server": "npx http-server . -p 3000 --cors -c-1",
     "sideload": "office-addin-dev-certs install && npx office-toolbox sideload -m manifest.xml -a outlook",
-    "build": "echo 'No build step required for this project'"
+    "build": "node build.js",
+    "prebuild": "npm run build"
   },
   "dependencies": {},
   "devDependencies": {
     "office-addin-debugging": "^5.0.0",
     "office-addin-dev-certs": "^1.11.0",
     "office-addin-manifest": "^1.12.0",
-    "http-server": "^14.1.1"
+    "http-server": "^14.1.1",
+    "dotenv": "^16.3.1"
   },
   "keywords": [
     "outlook",

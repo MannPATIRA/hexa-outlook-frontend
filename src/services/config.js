@@ -50,17 +50,24 @@ const Config = {
     REQUEST_TIMEOUT: 30000,
 
     // OpenAI API Configuration
-    // SECURITY: API key should be stored securely and not committed to git
-    // For frontend, use localStorage for user configuration
-    // In production, API calls should be proxied through backend to prevent key exposure
+    // Priority: 1. Environment variable (from Vercel/build), 2. localStorage, 3. Empty string
     get OPENAI_API_KEY() {
-        // Get from localStorage (user must configure this in settings)
-        // This prevents the key from being committed to the repository
-        const storedKey = localStorage.getItem('procurement_openai_api_key');
-        if (storedKey) return storedKey;
+        // First try environment variable (injected at build time for Vercel)
+        // This is set from process.env.OPENAI_API_KEY during build
+        if (typeof window !== 'undefined' && window.OPENAI_API_KEY_ENV) {
+            return window.OPENAI_API_KEY_ENV;
+        }
+        
+        // Fallback to localStorage (for user configuration or local dev)
+        try {
+            const storedKey = localStorage.getItem('procurement_openai_api_key');
+            if (storedKey) return storedKey;
+        } catch (e) {
+            // localStorage might not be available in some contexts
+            console.warn('localStorage not available:', e);
+        }
         
         // Return empty string if not configured (will cause API calls to fail)
-        // User must set the key via settings UI or localStorage
         return '';
     },
     OPENAI_API_BASE_URL: 'https://api.openai.com/v1',
