@@ -155,7 +155,33 @@ for (const item of filesToCopy) {
 const indexHtmlPath = path.join(publicDir, 'index.html');
 fs.writeFileSync(indexHtmlPath, indexHtmlContent, 'utf8');
 
-console.log('✅ Build complete: Environment variables injected');
+// Verify critical assets are present
+const criticalAssets = [
+    'assets/hexa-logo-2.png',
+    'assets/hexa-logo.png',
+    'assets/attachments/RFQ_Template.pdf',
+    'assets/attachments/Terms_Conditions.pdf'
+];
+
+console.log('\n📦 Verifying critical assets...');
+let allAssetsPresent = true;
+for (const asset of criticalAssets) {
+    const assetPath = path.join(publicDir, asset);
+    if (fs.existsSync(assetPath)) {
+        const stats = fs.statSync(assetPath);
+        console.log(`✅ ${asset} (${(stats.size / 1024).toFixed(2)} KB)`);
+    } else {
+        console.log(`❌ MISSING: ${asset}`);
+        allAssetsPresent = false;
+    }
+}
+
+if (!allAssetsPresent) {
+    console.log('\n⚠️  WARNING: Some critical assets are missing!');
+    console.log('   Make sure all files in the assets folder are committed to git.');
+}
+
+console.log('\n✅ Build complete: Environment variables injected');
 console.log('✅ Files copied to public directory for Vercel');
 if (openaiKey) {
     console.log('✅ OpenAI API key found and injected (length: ' + openaiKey.length + ' chars)');

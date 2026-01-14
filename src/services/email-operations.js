@@ -744,6 +744,13 @@ const EmailOperations = {
 
     /**
      * Create and save draft using Graph API (doesn't open compose window)
+     * @param {Object} options - Draft options
+     * @param {string|Array} options.to - Recipient email(s)
+     * @param {string} options.subject - Email subject
+     * @param {string} options.body - Email HTML body
+     * @param {Array} options.cc - CC recipients (optional)
+     * @param {Array} options.attachments - Attachments in Graph API format (optional)
+     * @returns {Promise<Object>} Created draft object
      */
     async saveDraft(options) {
         if (!AuthService.isSignedIn()) {
@@ -771,10 +778,78 @@ const EmailOperations = {
             }));
         }
 
+        // Create the draft first
         const draft = await AuthService.graphRequest('/me/messages', {
             method: 'POST',
             body: JSON.stringify(message)
         });
+
+        // Add attachments if provided
+        if (options.attachments && Array.isArray(options.attachments) && options.attachments.length > 0) {
+            console.log(`Adding ${options.attachments.length} attachment(s) to draft ${draft.id}`);
+            console.log('Attachment details:', options.attachments.map(a => ({ name: a.name, hasContent: !!a.contentBytes })));
+            
+            for (let i = 0; i < options.attachments.length; i++) {
+                const attachment = options.attachments[i];
+                try {
+                    // Validate attachment has required fields
+                    if (!attachment.contentBytes || attachment.contentBytes.length === 0) {
+                        throw new Error(`Attachment ${attachment.name} has no contentBytes`);
+                    }
+                    
+                    if (!attachment.name) {
+                        throw new Error(`Attachment missing name`);
+                    }
+                    
+                    // Ensure attachment has the correct format for Graph API
+                    const attachmentPayload = {
+                        '@odata.type': '#microsoft.graph.fileAttachment',
+                        name: attachment.name,
+                        contentType: attachment.contentType || 'application/pdf',
+                        contentBytes: attachment.contentBytes
+                    };
+                    
+                    console.log(`[saveDraft] Uploading attachment ${i + 1}/${options.attachments.length}: ${attachment.name}`);
+                    console.log(`[saveDraft] Content size: ${attachmentPayload.contentBytes.length} base64 chars`);
+                    
+                    // Upload attachment to the draft
+                    const result = await AuthService.graphRequest(`/me/messages/${draft.id}/attachments`, {
+                        method: 'POST',
+                        body: JSON.stringify(attachmentPayload)
+                    });
+                    
+                    console.log(`[saveDraft] ✓ Successfully attached ${attachment.name} to draft ${draft.id}`);
+                    
+                    // Small delay between attachments to avoid rate limiting
+                    if (i < options.attachments.length - 1) {
+                        await new Promise(resolve => setTimeout(resolve, 200));
+                    }
+                } catch (attachmentError) {
+                    console.error(`[saveDraft] ✗ CRITICAL: Failed to attach ${attachment.name}:`, attachmentError);
+                    console.error('[saveDraft] Error details:', {
+                        message: attachmentError.message,
+                        stack: attachmentError.stack,
+                        attachmentName: attachment.name,
+                        hasContentBytes: !!attachment.contentBytes,
+                        contentBytesLength: attachment.contentBytes ? attachment.contentBytes.length : 0,
+                        draftId: draft.id
+                    });
+                    // Continue with other attachments even if one fails
+                }
+            }
+            
+            // Verify attachments were added by fetching the draft
+            try {
+                const verifyDraft = await AuthService.graphRequest(`/me/messages/${draft.id}?$expand=attachments&$select=id,subject,attachments`);
+                const attachmentCount = verifyDraft.attachments ? verifyDraft.attachments.length : 0;
+                console.log(`✓ Draft ${draft.id} now has ${attachmentCount} attachment(s)`);
+                if (attachmentCount === 0) {
+                    console.warn('⚠ WARNING: Draft was created but no attachments were found. This may indicate an upload failure.');
+                }
+            } catch (verifyError) {
+                console.warn('Could not verify attachments:', verifyError);
+            }
+        }
 
         return draft;
     },
