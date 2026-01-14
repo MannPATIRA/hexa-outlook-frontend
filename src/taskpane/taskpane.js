@@ -3655,7 +3655,40 @@ async function handleGenerateRFQs() {
         
         // Auto-save drafts if user is signed in
         if (AuthService.isSignedIn()) {
-            Helpers.showLoading('Saving drafts...');
+            Helpers.showLoading('Preparing attachments...');
+            
+            // Prepare PDF attachments for Graph API
+            let graphApiAttachments = [];
+            try {
+                console.log('Starting attachment preparation...');
+                graphApiAttachments = await AttachmentUtils.prepareGraphApiAttachments();
+                console.log(`✓ Prepared ${graphApiAttachments.length} attachment(s) for drafts`);
+                
+                // Verify attachments have content
+                for (const att of graphApiAttachments) {
+                    if (!att.contentBytes || att.contentBytes.length === 0) {
+                        console.error(`⚠ Attachment ${att.name} has no content!`);
+                    } else {
+                        console.log(`✓ Attachment ${att.name} has ${att.contentBytes.length} bytes`);
+                    }
+                }
+                
+                if (graphApiAttachments.length === 0) {
+                    console.warn('⚠ No attachments prepared - drafts will be created without PDFs');
+                    Helpers.showError('Warning: Could not load PDF attachments. Drafts will be created without them.');
+                }
+            } catch (attachmentError) {
+                console.error('✗ CRITICAL: Failed to prepare attachments:', attachmentError);
+                console.error('Error stack:', attachmentError.stack);
+                Helpers.showError('Failed to load PDF attachments: ' + attachmentError.message);
+                // Continue without attachments if preparation fails
+            }
+            
+            Helpers.showLoading(`Saving ${rfqs.length} draft(s) with ${graphApiAttachments.length} attachment(s)...`);
+            
+            let successCount = 0;
+            let failCount = 0;
+            
             for (const rfq of rfqs) {
                 try {
                     // Extract body content and convert to HTML
@@ -3672,21 +3705,30 @@ async function handleGenerateRFQs() {
                         htmlBody = '<div>&nbsp;</div>';
                     }
                     
-                    // Save draft
+                    console.log(`Creating draft for ${rfq.supplier_name} with ${graphApiAttachments.length} attachment(s)...`);
+                    
+                    // Save draft with attachments
                     const draft = await EmailOperations.saveDraft({
                         to: [rfq.supplier_email],
                         subject: rfq.subject || '',
                         body: htmlBody,
-                        cc: []
+                        cc: [],
+                        attachments: graphApiAttachments
                     });
                     
                     // Store draft ID in RFQ object
                     rfq.draftId = draft.id;
+                    successCount++;
+                    console.log(`✓ Draft created for ${rfq.supplier_name} (ID: ${draft.id})`);
                 } catch (error) {
-                    console.error(`Failed to save draft for ${rfq.supplier_name}:`, error);
+                    failCount++;
+                    console.error(`✗ Failed to save draft for ${rfq.supplier_name}:`, error);
+                    console.error('Error stack:', error.stack);
                     // Continue with other RFQs even if one fails
                 }
             }
+            
+            console.log(`Draft creation complete: ${successCount} succeeded, ${failCount} failed`);
         }
         
         AppState.rfqs = rfqs;
@@ -3890,6 +3932,23 @@ async function createSingleDraft(index) {
         }
         
         // Create new draft if no existing draft or opening failed
+        Helpers.showLoading('Preparing attachments...');
+        
+        // Prepare attachments for this draft
+        let attachments = [];
+        try {
+            if (AuthService.isSignedIn()) {
+                // Use Graph API format for signed-in users
+                attachments = await AttachmentUtils.prepareGraphApiAttachments();
+            } else {
+                // Use Office.js format for non-signed-in users
+                attachments = await AttachmentUtils.prepareOfficeJsAttachments();
+            }
+        } catch (attachmentError) {
+            console.warn('Failed to prepare attachments, continuing without them:', attachmentError);
+            // Continue without attachments if preparation fails
+        }
+        
         Helpers.showLoading('Creating draft...');
         
         // Extract body content (handles both string and object formats)
@@ -3914,7 +3973,8 @@ async function createSingleDraft(index) {
         const result = await EmailOperations.createDraft(
             rfq.supplier_email,
             rfq.subject,
-            htmlBody
+            htmlBody,
+            attachments
         );
         
         // Store draft ID if it was saved
