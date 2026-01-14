@@ -11,8 +11,7 @@
     "validate": "office-addin-manifest validate manifest.xml",
     "dev-server": "npx http-server . -p 3000 --cors -c-1",
     "sideload": "office-addin-dev-certs install && npx office-toolbox sideload -m manifest.xml -a outlook",
-    "build": "node build.js",
-    "prebuild": "npm run build"
+    "build": "node build.js"
   },
   "dependencies": {},
   "devDependencies": {
