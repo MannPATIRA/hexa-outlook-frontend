@@ -13,9 +13,9 @@
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="Procurement Workflow"/>
   <Description DefaultValue="Manage Purchase Requisitions, RFQs, and supplier communications directly in Outlook"/>
-  <IconUrl DefaultValue="https://localhost:3000/assets/icon-64.png"/>
-  <HighResolutionIconUrl DefaultValue="https://localhost:3000/assets/icon-128.png"/>
-  <SupportUrl DefaultValue="https://localhost:3000"/>
+  <IconUrl DefaultValue="https://hexa-outlook-frontend.vercel.app/assets/icon-64.png"/>
+  <HighResolutionIconUrl DefaultValue="https://hexa-outlook-frontend.vercel.app/assets/icon-128.png"/>
+  <SupportUrl DefaultValue="https://hexa-outlook-frontend.vercel.app"/>
 
   <!-- Outlook-specific capabilities -->
   <Hosts>
@@ -33,7 +33,7 @@
   <FormSettings>
     <Form xsi:type="ItemRead">
       <DesktopSettings>
-        <SourceLocation DefaultValue="https://localhost:3000/src/taskpane/taskpane.html"/>
+        <SourceLocation DefaultValue="https://hexa-outlook-frontend.vercel.app/src/taskpane/taskpane.html"/>
         <RequestedHeight>250</RequestedHeight>
       </DesktopSettings>
     </Form>
@@ -157,16 +157,16 @@
       <!-- Resources referenced by the manifest -->
       <Resources>
         <bt:Images>
-          <bt:Image id="Icon.16x16" DefaultValue="https://localhost:3000/assets/icon-16.png"/>
-          <bt:Image id="Icon.32x32" DefaultValue="https://localhost:3000/assets/icon-32.png"/>
-          <bt:Image id="Icon.48x48" DefaultValue="https://localhost:3000/assets/icon-48.png"/>
-          <bt:Image id="Icon.64x64" DefaultValue="https://localhost:3000/assets/icon-64.png"/>
-          <bt:Image id="Icon.80x80" DefaultValue="https://localhost:3000/assets/icon-80.png"/>
-          <bt:Image id="Icon.128x128" DefaultValue="https://localhost:3000/assets/icon-128.png"/>
+          <bt:Image id="Icon.16x16" DefaultValue="https://hexa-outlook-frontend.vercel.app/assets/icon-16.png"/>
+          <bt:Image id="Icon.32x32" DefaultValue="https://hexa-outlook-frontend.vercel.app/assets/icon-32.png"/>
+          <bt:Image id="Icon.48x48" DefaultValue="https://hexa-outlook-frontend.vercel.app/assets/icon-48.png"/>
+          <bt:Image id="Icon.64x64" DefaultValue="https://hexa-outlook-frontend.vercel.app/assets/icon-64.png"/>
+          <bt:Image id="Icon.80x80" DefaultValue="https://hexa-outlook-frontend.vercel.app/assets/icon-80.png"/>
+          <bt:Image id="Icon.128x128" DefaultValue="https://hexa-outlook-frontend.vercel.app/assets/icon-128.png"/>
         </bt:Images>
         <bt:Urls>
-          <bt:Url id="Taskpane.Url" DefaultValue="https://localhost:3000/src/taskpane/taskpane.html"/>
-          <bt:Url id="Commands.Url" DefaultValue="https://localhost:3000/src/commands/commands.html"/>
+          <bt:Url id="Taskpane.Url" DefaultValue="https://hexa-outlook-frontend.vercel.app/src/taskpane/taskpane.html"/>
+          <bt:Url id="Commands.Url" DefaultValue="https://hexa-outlook-frontend.vercel.app/src/commands/commands.html"/>
         </bt:Urls>
         <bt:ShortStrings>
           <bt:String id="GroupLabel" DefaultValue="Procurement"/>
