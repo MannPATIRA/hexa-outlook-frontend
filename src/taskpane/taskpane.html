@@ -26,7 +26,7 @@
                 <img src="../../assets/hexa-logo.png" 
                      onerror="this.src='https://hexa-outlook-frontend.vercel.app/assets/hexa-logo.png'; this.onerror=null;" 
                      alt="Hexa Logo" class="header-logo"/>
-                <span class="header-brand">Hexa</span>
+                <span id="header-title" class="header-brand">Hexa</span>
             </div>
             <div class="header-actions">
                 <!-- Auth Status -->
@@ -86,10 +86,6 @@
         
         <!-- Draft Mode - Shown when user is viewing/editing a draft RFQ email -->
         <div id="draft-mode" class="mode-container hidden">
-            <div class="mode-header">
-                <div class="mode-icon"></div>
-                <h2>RFQ Draft Editor</h2>
-            </div>
             <div class="mode-body">
                 <p class="mode-description">You're viewing an RFQ draft. You can edit it directly in Outlook, then use the button below to send all RFQ drafts.</p>
                 
@@ -124,18 +120,14 @@
                 
                 <!-- RFQ Progress Tracker (shown after RFQs are sent) -->
                 <div id="rfq-progress-tracker" class="rfq-progress-tracker hidden">
-                    <h3>RFQ Progress</h3>
+                    <h3>RFQ Status</h3>
                     
                     <!-- Sent RFQs -->
                     <div class="progress-item" id="progress-item-sent">
                         <div class="progress-item-header">
                             <span class="progress-icon"></span>
-                            <span class="progress-label">RFQs Sent</span>
+                            <span class="progress-label">Sent</span>
                             <span id="sent-rfq-count" class="progress-count">0</span>
-                        </div>
-                        <div class="progress-bar small">
-                            <div class="progress-bar-label hidden" id="sent-rfq-label"></div>
-                            <div id="sent-rfq-progress" class="progress-fill" style="width: 100%; background: #107c10;"></div>
                         </div>
                     </div>
                     
@@ -143,12 +135,8 @@
                     <div class="progress-item" id="progress-item-scheduled">
                         <div class="progress-item-header">
                             <span class="progress-icon"></span>
-                            <span class="progress-label">Auto-Replies Scheduled</span>
+                            <span class="progress-label">Auto replies scheduled</span>
                             <span id="auto-replies-scheduled-count" class="progress-count">0</span>
-                        </div>
-                        <div class="progress-bar small">
-                            <div class="progress-bar-label hidden" id="auto-replies-scheduled-label"></div>
-                            <div id="auto-replies-scheduled-progress" class="progress-fill" style="width: 0%; background: #0078d4;"></div>
                         </div>
                     </div>
                     
@@ -156,12 +144,11 @@
                     <div class="progress-item" id="progress-item-received">
                         <div class="progress-item-header">
                             <span class="progress-icon"></span>
-                            <span class="progress-label">Replies Received</span>
-                            <span id="replies-received-count" class="progress-count">0 / 0</span>
+                            <span class="progress-label">Replies received</span>
+                            <span id="replies-received-count" class="progress-count">0</span>
                         </div>
                         <div class="progress-bar small">
-                            <div class="progress-bar-label hidden" id="replies-received-label"></div>
-                            <div id="replies-received-progress" class="progress-fill" style="width: 0%; background: #ca5010;"></div>
+                            <div id="replies-received-progress" class="progress-fill"></div>
                         </div>
                     </div>
                     
@@ -169,14 +156,16 @@
                     <div class="progress-item" id="progress-item-sorted">
                         <div class="progress-item-header">
                             <span class="progress-icon"></span>
-                            <span class="progress-label">Replies Sorted to Folders</span>
-                            <span id="replies-sorted-count" class="progress-count">0 / 0</span>
+                            <span class="progress-label">Replies sorted</span>
+                            <span id="replies-sorted-count" class="progress-count">0</span>
                         </div>
                         <div class="progress-bar small">
-                            <div class="progress-bar-label hidden" id="replies-sorted-label"></div>
-                            <div id="replies-sorted-progress" class="progress-fill" style="width: 0%; background: #8764b8;"></div>
+                            <div id="replies-sorted-progress" class="progress-fill"></div>
                         </div>
                     </div>
+
+                    <!-- Status Interpretation Message -->
+                    <p id="rfq-status-message" class="rfq-status-message"></p>
                     
                     <!-- Refresh Button -->
                     <button id="refresh-progress-btn" class="ms-Button ms-Button--default">
