@@ -9,9 +9,8 @@ const Config = {
     API_BASE_URL: (() => {
         // Check if we're in production (not localhost)
         if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-            // Production: You need to set this to your actual backend URL
-            // TODO: Replace with your deployed backend URL
-            return 'https://your-backend.railway.app'; // CHANGE THIS
+            // Production: Backend deployed on Render
+            return 'https://hexa-outlook-backend.onrender.com';
         }
         // Development: use localhost
         return 'http://localhost:8000';

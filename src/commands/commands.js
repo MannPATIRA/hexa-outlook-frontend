@@ -4,7 +4,18 @@
  */
 
 // API Configuration (duplicated here for standalone usage)
-const API_BASE_URL = localStorage.getItem('procurement_api_url') || 'http://localhost:8000';
+// Default to production backend, fallback to localhost for local dev
+const getApiBaseUrl = () => {
+    const stored = localStorage.getItem('procurement_api_url');
+    if (stored) return stored;
+    
+    // Check if we're in production (not localhost)
+    if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+        return 'https://hexa-outlook-backend.onrender.com';
+    }
+    return 'http://localhost:8000';
+};
+const API_BASE_URL = getApiBaseUrl();
 
 Office.onReady((info) => {
     // Office is ready
