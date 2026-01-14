@@ -307,25 +307,10 @@
                 
                 <!-- Step 1: Select PR -->
                 <div id="step-select-pr" class="workflow-step">
-                    <h2 class="ms-font-l step-header">
+                    <h2 class="ms-font-l step-header clickable-step-title" id="pr-step-title">
                         <span class="step-number">1</span>
-                        Select Purchase Requisition
+                        <span class="step-title-text">Select Purchase Requisition</span>
                     </h2>
-                    <div class="step-content">
-                        <div id="pr-list-container">
-                            <div class="search-box">
-                                <input type="text" id="pr-search" placeholder="Search PRs..." class="ms-TextField-field"/>
-                            </div>
-                            <div id="pr-list" class="selectable-list">
-                                <!-- PR items will be inserted here -->
-                                <p class="placeholder-text">Click "Refresh" to load open PRs</p>
-                            </div>
-                        </div>
-                        <div id="selected-pr-info" class="selected-item-info hidden">
-                            <h3>Selected PR:</h3>
-                            <div id="pr-details"></div>
-                        </div>
-                    </div>
                 </div>
 
                 <!-- Step 2: Select Suppliers -->
@@ -335,17 +320,11 @@
                         Select Suppliers
                     </h2>
                     <div class="step-content">
-                        <div id="supplier-list-container">
-                            <div class="list-header">
-                                <span id="supplier-count">0 suppliers found</span>
-                                <label class="select-all-label">
-                                    <input type="checkbox" id="select-all-suppliers"/>
-                                    Select All
-                                </label>
-                            </div>
-                            <div id="supplier-list" class="selectable-list checkbox-list">
-                                <!-- Supplier items will be inserted here -->
-                            </div>
+                        <div id="supplier-selection-summary">
+                            <p id="selected-suppliers-count">0 suppliers selected</p>
+                            <button id="open-supplier-modal-btn" class="ms-Button ms-Button--primary">
+                                <span class="ms-Button-label">Select Suppliers</span>
+                            </button>
                         </div>
                         <button id="generate-rfqs-btn" class="ms-Button ms-Button--primary" disabled>
                             <span class="ms-Button-label">Generate RFQs</span>
@@ -566,6 +545,78 @@
                     </button>
                     <button id="finalize-send-btn" class="ms-Button ms-Button--primary">
                         <span class="ms-Button-label">Finalize & Send</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Supplier Selection Modal -->
+        <div id="supplier-selection-modal" class="modal hidden supplier-modal">
+            <div class="modal-content modal-large">
+                <div class="modal-header">
+                    <h2>Select Suppliers</h2>
+                    <button id="close-supplier-modal" class="ms-Button ms-Button--icon">
+                        <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--Cancel"></i></span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="supplier-modal-header">
+                        <div class="supplier-search-section">
+                            <input type="text" id="supplier-search" placeholder="Search suppliers..." class="ms-TextField-field"/>
+                        </div>
+                        <div class="supplier-modal-actions">
+                            <span id="supplier-count">0 suppliers found</span>
+                            <label class="select-all-label">
+                                <input type="checkbox" id="select-all-suppliers"/>
+                                Select All
+                            </label>
+                        </div>
+                    </div>
+                    <div id="supplier-list" class="selectable-list checkbox-list supplier-modal-list">
+                        <!-- Supplier items will be inserted here -->
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button id="add-new-supplier-btn" class="ms-Button">
+                        <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--Add"></i></span>
+                        <span class="ms-Button-label">Add New Supplier</span>
+                    </button>
+                    <div class="modal-footer-right">
+                        <span id="selected-count-display">0 selected</span>
+                        <button id="apply-supplier-selection" class="ms-Button ms-Button--primary">
+                            <span class="ms-Button-label">Done</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Purchase Requisition Selection Modal -->
+        <div id="pr-selection-modal" class="modal hidden pr-modal">
+            <div class="modal-content modal-large">
+                <div class="modal-header">
+                    <h2>Select Purchase Requisition</h2>
+                    <button id="close-pr-modal" class="ms-Button ms-Button--icon">
+                        <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--Cancel"></i></span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="pr-modal-header">
+                        <div class="pr-search-section">
+                            <input type="text" id="pr-search" placeholder="Search PRs..." class="ms-TextField-field"/>
+                        </div>
+                    </div>
+                    <div id="pr-list" class="selectable-list pr-modal-list">
+                        <!-- PR items will be inserted here -->
+                    </div>
+                    <div id="selected-pr-info" class="selected-item-info hidden">
+                        <h3>Selected PR:</h3>
+                        <div id="pr-details"></div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button id="apply-pr-selection" class="ms-Button ms-Button--primary">
+                        <span class="ms-Button-label">Done</span>
                     </button>
                 </div>
             </div>

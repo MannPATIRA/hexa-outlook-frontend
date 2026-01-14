@@ -657,6 +657,26 @@ main {
     pointer-events: none;
 }
 
+.clickable-step-title {
+    cursor: pointer;
+    user-select: none;
+    transition: color 0.2s ease;
+}
+
+.clickable-step-title:hover {
+    color: #0d3d61;
+}
+
+.clickable-step-title .step-title-text {
+    text-decoration: underline;
+    text-decoration-color: transparent;
+    transition: text-decoration-color 0.2s ease;
+}
+
+.clickable-step-title:hover .step-title-text {
+    text-decoration-color: #0d3d61;
+}
+
 .step-header {
     display: flex;
     align-items: center;
@@ -815,6 +835,14 @@ main {
     font-weight: 600;
     margin-bottom: 8px;
     color: #605e5c;
+}
+
+.pr-description {
+    font-size: 13px;
+    line-height: 1.5;
+    color: #323130;
+    margin: 0;
+    padding: 0;
 }
 
 /* ==================== RFQ CARDS ==================== */
@@ -1164,6 +1192,148 @@ textarea.ms-TextField-field {
 
 .modal-content.modal-large {
     max-width: 600px;
+}
+
+.supplier-modal .modal-content {
+    max-width: 90%;
+    width: 90%;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.supplier-modal .modal-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0;
+}
+
+.supplier-modal-header {
+    padding: 16px;
+    border-bottom: 1px solid #edebe9;
+    background-color: #faf9f8;
+}
+
+.supplier-search-section {
+    margin-bottom: 12px;
+}
+
+.supplier-search-section input {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid #8a8886;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+.supplier-modal-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.supplier-modal-list {
+    padding: 16px;
+    max-height: calc(90vh - 250px);
+    overflow-y: auto;
+}
+
+.modal-footer-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+#selected-count-display {
+    font-size: 14px;
+    color: #605e5c;
+    font-weight: 500;
+}
+
+#supplier-selection-summary {
+    padding: 16px;
+    background-color: #faf9f8;
+    border-radius: 4px;
+    margin-bottom: 16px;
+    text-align: center;
+}
+
+#supplier-selection-summary p {
+    margin-bottom: 12px;
+    font-size: 14px;
+    color: #323130;
+}
+
+/* PR Selection Modal Styles */
+.pr-modal .modal-content {
+    max-width: 90%;
+    width: 90%;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.pr-modal .modal-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0;
+}
+
+.pr-modal-header {
+    padding: 16px;
+    border-bottom: 1px solid #edebe9;
+    background-color: #faf9f8;
+}
+
+.pr-search-section {
+    margin-bottom: 0;
+}
+
+.pr-search-section input {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid #8a8886;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+.pr-modal-list {
+    padding: 16px;
+    max-height: calc(90vh - 300px);
+    overflow-y: auto;
+}
+
+#pr-selection-summary {
+    padding: 16px;
+    background-color: #faf9f8;
+    border-radius: 4px;
+    margin-bottom: 16px;
+    text-align: center;
+}
+
+#pr-selection-summary h3 {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 12px;
+    color: #323130;
+}
+
+#pr-summary-details {
+    text-align: left;
+    background-color: white;
+    padding: 12px;
+    border-radius: 4px;
+    margin-bottom: 12px;
+}
+
+#pr-summary-details p {
+    margin: 4px 0;
+    font-size: 14px;
+    color: #323130;
+}
+
+#pr-summary-details strong {
+    color: #0d3d61;
 }
 
 .modal-header {

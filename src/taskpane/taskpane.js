@@ -2896,12 +2896,22 @@ function setupEventListeners() {
     document.getElementById('close-settings')?.addEventListener('click', closeSettingsModal);
     document.getElementById('save-settings')?.addEventListener('click', saveSettings);
 
-    // PR search
+    // PR modal
+    document.getElementById('pr-step-title')?.addEventListener('click', openPRModal);
+    document.getElementById('close-pr-modal')?.addEventListener('click', closePRModal);
+    document.getElementById('apply-pr-selection')?.addEventListener('click', applyPRSelection);
     document.getElementById('pr-search')?.addEventListener('input', 
         Helpers.debounce(handlePRSearch, 300));
 
     // Select all suppliers
     document.getElementById('select-all-suppliers')?.addEventListener('change', handleSelectAllSuppliers);
+
+    // Supplier modal
+    document.getElementById('open-supplier-modal-btn')?.addEventListener('click', openSupplierModal);
+    document.getElementById('close-supplier-modal')?.addEventListener('click', closeSupplierModal);
+    document.getElementById('apply-supplier-selection')?.addEventListener('click', applySupplierSelection);
+    document.getElementById('add-new-supplier-btn')?.addEventListener('click', handleAddNewSupplier);
+    document.getElementById('supplier-search')?.addEventListener('input', handleSupplierSearch);
 
     // Generate RFQs button
     document.getElementById('generate-rfqs-btn')?.addEventListener('click', handleGenerateRFQs);
@@ -3082,6 +3092,78 @@ function handlePRSearch(event) {
     renderPRList(filtered);
 }
 
+function openPRModal() {
+    const modal = document.getElementById('pr-selection-modal');
+    if (!modal) return;
+    
+    // Load PRs if not already loaded
+    if (!AppState.prs || AppState.prs.length === 0) {
+        loadOpenPRs().then(() => {
+            if (AppState.prs && AppState.prs.length > 0) {
+                renderPRList(AppState.prs);
+            }
+        });
+    } else {
+        renderPRList(AppState.prs);
+    }
+    
+    // Restore selection if PR is already selected
+    if (AppState.selectedPR) {
+        restorePRSelection();
+    }
+    
+    // Show modal
+    modal.classList.remove('hidden');
+    
+    // Focus search input
+    const searchInput = document.getElementById('pr-search');
+    if (searchInput) {
+        setTimeout(() => searchInput.focus(), 100);
+    }
+}
+
+function closePRModal() {
+    const modal = document.getElementById('pr-selection-modal');
+    if (modal) {
+        modal.classList.add('hidden');
+    }
+}
+
+function applyPRSelection() {
+    // Close modal
+    closePRModal();
+}
+
+function restorePRSelection() {
+    // Highlight selected PR in modal
+    if (AppState.selectedPR) {
+        document.querySelectorAll('#pr-list .list-item').forEach(item => {
+            item.classList.remove('selected');
+            if (item.dataset.prId === AppState.selectedPR.pr_id) {
+                item.classList.add('selected');
+            }
+        });
+        
+        // Show selected PR details in modal
+        updatePRDetailsInModal();
+    }
+}
+
+function updatePRDetailsInModal() {
+    const detailsContainer = document.getElementById('pr-details');
+    const infoContainer = document.getElementById('selected-pr-info');
+    
+    if (AppState.selectedPR && detailsContainer) {
+        const description = AppState.selectedPR.description || 'N/A';
+        detailsContainer.innerHTML = `
+            <p class="pr-description">${Helpers.escapeHtml(description)}</p>
+        `;
+        if (infoContainer) infoContainer.classList.remove('hidden');
+    } else {
+        if (infoContainer) infoContainer.classList.add('hidden');
+    }
+}
+
 // ==================== PR SELECTION ====================
 async function handlePRSelect(pr) {
     // Update UI selection state
@@ -3113,17 +3195,8 @@ async function handlePRSelect(pr) {
         currentStep: 'suppliers'
     });
     
-    // Show PR details
-    const detailsContainer = document.getElementById('pr-details');
-    if (detailsContainer) {
-        detailsContainer.innerHTML = `
-            <p><strong>PR ID:</strong> ${Helpers.escapeHtml(pr.pr_id)}</p>
-            <p><strong>Material:</strong> ${Helpers.escapeHtml(pr.material || 'N/A')}</p>
-            <p><strong>Quantity:</strong> ${pr.quantities || 'N/A'} ${pr.unit || ''}</p>
-            <p><strong>Description:</strong> ${Helpers.escapeHtml(pr.description || 'N/A')}</p>
-        `;
-    }
-    Helpers.showElement(document.getElementById('selected-pr-info'));
+    // Update PR details in modal
+    updatePRDetailsInModal();
     
     // Enable supplier step and load suppliers
     Helpers.enableStep(document.getElementById('step-select-suppliers'));
@@ -3227,6 +3300,102 @@ function handleSelectAllSuppliers(event) {
     updateGenerateRFQsButton();
 }
 
+function updateSelectedSuppliersCount() {
+    const count = AppState.selectedSuppliers.length;
+    const summaryEl = document.getElementById('selected-suppliers-count');
+    const modalCountEl = document.getElementById('selected-count-display');
+    
+    if (summaryEl) {
+        summaryEl.textContent = `${count} supplier${count !== 1 ? 's' : ''} selected`;
+    }
+    
+    if (modalCountEl) {
+        modalCountEl.textContent = `${count} selected`;
+    }
+}
+
+function openSupplierModal() {
+    const modal = document.getElementById('supplier-selection-modal');
+    if (!modal) return;
+    
+    // Render suppliers in modal if we have them
+    if (AppState.suppliers && AppState.suppliers.length > 0) {
+        renderSupplierList(AppState.suppliers);
+    }
+    
+    // Restore checkbox states
+    restoreSupplierCheckboxStates();
+    
+    // Update counts
+    updateSelectedSuppliersCount();
+    
+    // Show modal
+    modal.classList.remove('hidden');
+    
+    // Focus search input
+    const searchInput = document.getElementById('supplier-search');
+    if (searchInput) {
+        setTimeout(() => searchInput.focus(), 100);
+    }
+}
+
+function closeSupplierModal() {
+    const modal = document.getElementById('supplier-selection-modal');
+    if (modal) {
+        modal.classList.add('hidden');
+    }
+}
+
+function applySupplierSelection() {
+    // Update summary and close modal
+    updateSelectedSuppliersCount();
+    closeSupplierModal();
+    updateGenerateRFQsButton();
+}
+
+function handleAddNewSupplier() {
+    // Non-functional button - just show a message
+    Helpers.showSuccess('Add New Supplier feature coming soon');
+}
+
+function handleSupplierSearch(event) {
+    const searchTerm = event.target.value.toLowerCase();
+    const suppliers = AppState.suppliers || [];
+    
+    if (!searchTerm) {
+        renderSupplierList(suppliers);
+        return;
+    }
+    
+    const filtered = suppliers.filter(supplier => {
+        const name = (supplier.name || '').toLowerCase();
+        const email = (supplier.email || '').toLowerCase();
+        const contact = (supplier.contact_person || '').toLowerCase();
+        const reason = (supplier.match_reason || '').toLowerCase();
+        
+        return name.includes(searchTerm) || 
+               email.includes(searchTerm) || 
+               contact.includes(searchTerm) || 
+               reason.includes(searchTerm);
+    });
+    
+    renderSupplierList(filtered);
+}
+
+function restoreSupplierCheckboxStates() {
+    // Restore checkbox states based on AppState.selectedSuppliers
+    const checkboxes = document.querySelectorAll('.supplier-checkbox');
+    checkboxes.forEach(cb => {
+        cb.checked = AppState.selectedSuppliers.includes(cb.dataset.supplierId);
+    });
+    
+    // Update select all checkbox
+    const selectAllCheckbox = document.getElementById('select-all-suppliers');
+    if (selectAllCheckbox && checkboxes.length > 0) {
+        selectAllCheckbox.checked = AppState.selectedSuppliers.length === checkboxes.length;
+    }
+}
+
 function updateGenerateRFQsButton() {
     const btn = document.getElementById('generate-rfqs-btn');
     if (btn) {
@@ -3267,6 +3436,7 @@ function updateGenerateRFQsButton() {
             }
         }
     }
+    updateSelectedSuppliersCount();
 }
 
 // ==================== RFQ GENERATION ====================
