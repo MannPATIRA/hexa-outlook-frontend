@@ -8,7 +8,8 @@ const AuthService = {
         auth: {
             clientId: '6492ece4-5f90-4781-bc60-3cb5fc5adb10',
             authority: 'https://login.microsoftonline.com/common',
-            redirectUri: 'https://localhost:3000/src/taskpane/taskpane.html',
+            // Automatically detect redirect URI based on current location
+            redirectUri: window.location.origin + '/src/taskpane/taskpane.html',
         },
         cache: {
             cacheLocation: 'localStorage',

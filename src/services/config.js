@@ -3,7 +3,19 @@
  */
 const Config = {
     // Backend API URL - change this for different environments
-    API_BASE_URL: 'http://localhost:8000',
+    // For production, set this to your deployed backend URL (e.g., https://your-backend.railway.app)
+    // For local development, use http://localhost:8000
+    // This will be overridden by localStorage if user configures it in settings
+    API_BASE_URL: (() => {
+        // Check if we're in production (not localhost)
+        if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+            // Production: You need to set this to your actual backend URL
+            // TODO: Replace with your deployed backend URL
+            return 'https://your-backend.railway.app'; // CHANGE THIS
+        }
+        // Development: use localhost
+        return 'http://localhost:8000';
+    })(),
     API_PREFIX: '/api',
 
     // Get the full API URL
