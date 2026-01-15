@@ -976,17 +976,35 @@ async function loadPendingDrafts() {
         // Load and display progress
         await loadRfqProgress(state);
         
-        // Start monitoring if not already running
+        // Get material codes and sent emails for baseline check
         const materialCodes = state.materialCodes || [];
         const sentEmails = state.sentEmails || [];
+        
+        // Establish baseline if missing (prevents counting old replies)
+        if (!state.baselineTimestamp && sentCount > 0) {
+            console.log('No baseline found - establishing now to exclude old replies...');
+            try {
+                await establishBaseline(materialCodes, sentEmails);
+                console.log('✓ Baseline established for existing sent RFQs');
+                // Reload state after baseline is set
+                const updatedState = getPersistedState();
+                await loadRfqProgress(updatedState);
+            } catch (err) {
+                console.error('Failed to establish baseline:', err);
+                // Continue anyway - monitoring will use current timestamp
+            }
+        }
+        
+        // Start monitoring if we have tracking data
         if (materialCodes.length > 0 || sentEmails.length > 0) {
             console.log('Starting reply monitoring for sent RFQs...');
-            // Only start if we have tracking data
-            startReplyMonitoring(sentCount, () => {
+            await startReplyMonitoring(sentCount, () => {
                 // Update callback - reload progress display
                 const currentState = getPersistedState();
                 loadRfqProgress(currentState);
             }, materialCodes, sentEmails);
+        } else {
+            console.warn('Cannot start monitoring: No material codes or sent emails tracked');
         }
     } else {
         // Hide progress elements (no sent RFQs yet)
@@ -2500,7 +2518,7 @@ async function handleSendAllDraftsFromDraftMode() {
             updateProgress();
             
             // Start monitoring for replies with material codes and sent emails
-            startReplyMonitoring(sentCount, updateProgress, materialCodesArray, sentEmails);
+            await startReplyMonitoring(sentCount, updateProgress, materialCodesArray, sentEmails);
             
             Helpers.showSuccess(`Sent ${sentCount} RFQ(s) successfully! ${autoRepliesScheduled} auto-replies scheduled.`);
             return;
@@ -2688,7 +2706,7 @@ let activeReplyMonitoringInterval = null;
 /**
  * Start monitoring for replies and update progress bars
  */
-function startReplyMonitoring(totalSent, updateProgressCallback, materialCodes = [], sentEmails = []) {
+async function startReplyMonitoring(totalSent, updateProgressCallback, materialCodes = [], sentEmails = []) {
     if (!AuthService.isSignedIn()) return;
     
     // Clear any existing monitoring interval to prevent duplicates
@@ -2716,22 +2734,21 @@ function startReplyMonitoring(totalSent, updateProgressCallback, materialCodes =
         console.log(`Reply monitoring: Tracking ${sentEmails.length} sent emails`);
     }
     
-    // Establish baseline when monitoring starts (await it before starting interval)
-    let baselineEstablished = false;
-    
-    // Establish baseline immediately
-    establishBaseline(materialCodes, sentEmails).then(() => {
-        baselineEstablished = true;
-        console.log('Baseline established - monitoring can now count replies accurately');
-    }).catch(err => {
+    // Establish baseline BEFORE starting monitoring checks
+    console.log('Establishing baseline before starting reply monitoring...');
+    try {
+        await establishBaseline(materialCodes, sentEmails);
+        console.log('✓ Baseline established - monitoring can now count replies accurately');
+    } catch (err) {
         console.error('Failed to establish baseline:', err);
-        baselineEstablished = true; // Continue anyway
-    });
-    
-    const repliesReceivedCount = document.getElementById('replies-received-count');
-    const repliesReceivedProgress = document.getElementById('replies-received-progress');
-    const repliesSortedCount = document.getElementById('replies-sorted-count');
-    const repliesSortedProgress = document.getElementById('replies-sorted-progress');
+        // Use current timestamp as fallback baseline
+        const fallbackBaseline = Date.now();
+        persistState({
+            baselineTimestamp: fallbackBaseline,
+            baselineFolderCounts: {}
+        });
+        console.warn(`Using fallback baseline timestamp: ${new Date(fallbackBaseline).toISOString()}`);
+    }
     
     // Helper to check if email is an undeliverable/bounceback
     const isUndeliverable = (email, bodyPreview = '') => {
@@ -2809,16 +2826,31 @@ function startReplyMonitoring(totalSent, updateProgressCallback, materialCodes =
     // Define the monitoring check function
     const performMonitoringCheck = async () => {
         try {
+            // Get UI elements fresh each time (in case DOM changes)
+            const repliesReceivedCount = document.getElementById('replies-received-count');
+            const repliesReceivedProgress = document.getElementById('replies-received-progress');
+            const repliesSortedCount = document.getElementById('replies-sorted-count');
+            const repliesSortedProgress = document.getElementById('replies-sorted-progress');
+            
             // Get baseline and state
             const state = getPersistedState();
             const baselineTimestamp = state.baselineTimestamp || null;
             const baselineFolderCounts = state.baselineFolderCounts || {};
             const trackedSentEmails = state.sentEmails || sentEmails;
             
+            // Log baseline info for debugging
+            if (baselineTimestamp) {
+                console.log(`Monitoring check: Baseline timestamp: ${new Date(baselineTimestamp).toISOString()}`);
+            } else {
+                console.warn('Monitoring check: No baseline timestamp found - counting all replies');
+            }
+            
             // Get tracked conversation IDs
             const trackedConversationIds = new Set(
                 trackedSentEmails.map(e => e.conversationId).filter(Boolean)
             );
+            
+            console.log(`Monitoring check: Tracking ${trackedConversationIds.size} conversations, ${trackedSentEmails.length} sent emails`);
             
             let repliesReceived = 0;
             let repliesSorted = 0;
@@ -2996,15 +3028,25 @@ function startReplyMonitoring(totalSent, updateProgressCallback, materialCodes =
             
             repliesSorted = sortedReplyIds.size;
             
-            console.log(`Reply monitoring: ${repliesReceived} received, ${repliesSorted} sorted out of ${totalSent} sent`);
+            console.log(`Reply monitoring check complete: ${repliesReceived} received, ${repliesSorted} sorted out of ${totalSent} sent`);
             
-            // Update UI immediately
-            if (repliesReceivedCount) repliesReceivedCount.textContent = `${repliesReceived} / ${totalSent}`;
+            // Update UI immediately with fresh element references
+            if (repliesReceivedCount) {
+                repliesReceivedCount.textContent = `${repliesReceived} / ${totalSent}`;
+            } else {
+                console.warn('UI element replies-received-count not found');
+            }
+            
             if (repliesReceivedProgress && totalSent > 0) {
                 repliesReceivedProgress.style.width = `${Math.min(100, (repliesReceived / totalSent) * 100)}%`;
             }
             
-            if (repliesSortedCount) repliesSortedCount.textContent = `${repliesSorted} / ${repliesReceived}`;
+            if (repliesSortedCount) {
+                repliesSortedCount.textContent = `${repliesSorted} / ${repliesReceived}`;
+            } else {
+                console.warn('UI element replies-sorted-count not found');
+            }
+            
             if (repliesSortedProgress && repliesReceived > 0) {
                 repliesSortedProgress.style.width = `${Math.min(100, (repliesSorted / repliesReceived) * 100)}%`;
             } else if (repliesSortedProgress && repliesReceived === 0) {
@@ -3769,7 +3811,7 @@ function setupModeEventListeners() {
             const materialCodes = state.materialCodes || [];
             const sentEmails = state.sentEmails || [];
             if (materialCodes.length > 0 || sentEmails.length > 0) {
-                startReplyMonitoring(sentCount, () => {
+                await startReplyMonitoring(sentCount, () => {
                     const currentState = getPersistedState();
                     loadRfqProgress(currentState);
                 }, materialCodes, sentEmails);
