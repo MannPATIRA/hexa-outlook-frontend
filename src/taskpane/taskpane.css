@@ -874,11 +874,6 @@ main {
     transform: translateY(1px);
 }
 
-.dont-like-icon {
-    font-size: 16px;
-    line-height: 1;
-}
-
 .use-custom-checkbox {
     display: flex;
     align-items: center;
