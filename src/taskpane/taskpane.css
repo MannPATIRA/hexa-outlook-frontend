@@ -393,7 +393,10 @@ main {
 }
 
 .mode-header.quote-header {
-    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+    background: #ffffff;
+    color: #323130;
+    border-left: 3px solid #0d3d61;
+    border-bottom: 1px solid #edebe9;
 }
 
 .mode-icon {
