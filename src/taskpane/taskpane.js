@@ -959,13 +959,39 @@ async function loadPendingDrafts() {
     
     summaryCard.innerHTML = '<p class="loading-text">Loading drafts...</p>';
     
-    // Hide progress elements (those are for during/after sending)
-    if (sendStatus) sendStatus.classList.add('hidden');
-    if (progressTracker) progressTracker.classList.add('hidden');
-    
     if (!AuthService.isSignedIn()) {
         summaryCard.innerHTML = '<p class="loading-text">Please sign in to view drafts</p>';
         return;
+    }
+    
+    // Check if there are sent RFQs - if so, show progress tracker and start monitoring
+    const state = getPersistedState();
+    const sentCount = state.sentCount || 0;
+    
+    if (sentCount > 0) {
+        // Show progress tracker
+        if (progressTracker) progressTracker.classList.remove('hidden');
+        if (sendStatus) sendStatus.classList.add('hidden');
+        
+        // Load and display progress
+        await loadRfqProgress(state);
+        
+        // Start monitoring if not already running
+        const materialCodes = state.materialCodes || [];
+        const sentEmails = state.sentEmails || [];
+        if (materialCodes.length > 0 || sentEmails.length > 0) {
+            console.log('Starting reply monitoring for sent RFQs...');
+            // Only start if we have tracking data
+            startReplyMonitoring(sentCount, () => {
+                // Update callback - reload progress display
+                const currentState = getPersistedState();
+                loadRfqProgress(currentState);
+            }, materialCodes, sentEmails);
+        }
+    } else {
+        // Hide progress elements (no sent RFQs yet)
+        if (sendStatus) sendStatus.classList.add('hidden');
+        if (progressTracker) progressTracker.classList.add('hidden');
     }
     
     try {
@@ -2656,11 +2682,21 @@ async function establishBaseline(materialCodes, sentEmails = []) {
     }
 }
 
+// Store active monitoring interval to prevent duplicates
+let activeReplyMonitoringInterval = null;
+
 /**
  * Start monitoring for replies and update progress bars
  */
 function startReplyMonitoring(totalSent, updateProgressCallback, materialCodes = [], sentEmails = []) {
     if (!AuthService.isSignedIn()) return;
+    
+    // Clear any existing monitoring interval to prevent duplicates
+    if (activeReplyMonitoringInterval !== null) {
+        clearInterval(activeReplyMonitoringInterval);
+        activeReplyMonitoringInterval = null;
+        console.log('Cleared existing reply monitoring interval');
+    }
     
     // Get material codes and sent emails from state if not provided (for legacy/fallback)
     if (materialCodes.length === 0 || sentEmails.length === 0) {
@@ -2770,7 +2806,8 @@ function startReplyMonitoring(totalSent, updateProgressCallback, materialCodes =
         return true;
     };
     
-    let checkInterval = setInterval(async () => {
+    // Define the monitoring check function
+    const performMonitoringCheck = async () => {
         try {
             // Get baseline and state
             const state = getPersistedState();
@@ -2986,18 +3023,32 @@ function startReplyMonitoring(totalSent, updateProgressCallback, materialCodes =
             // Stop monitoring if all replies are sorted
             if (repliesReceived >= totalSent && repliesSorted >= repliesReceived) {
                 console.log('All replies received and sorted - stopping monitoring');
-                clearInterval(checkInterval);
+                if (activeReplyMonitoringInterval !== null) {
+                    clearInterval(activeReplyMonitoringInterval);
+                    activeReplyMonitoringInterval = null;
+                }
             }
             
         } catch (error) {
             console.warn('Error monitoring replies:', error);
         }
-    }, 3000); // Check every 3 seconds
+    };
+    
+    // Perform an immediate check
+    performMonitoringCheck();
+    
+    // Then set up interval for ongoing checks
+    activeReplyMonitoringInterval = setInterval(performMonitoringCheck, 3000); // Check every 3 seconds
+    
+    console.log('Reply monitoring started - checking every 3 seconds');
     
     // Stop after 10 minutes (give more time for replies)
     setTimeout(() => {
-        clearInterval(checkInterval);
-        console.log('Reply monitoring stopped after timeout');
+        if (activeReplyMonitoringInterval !== null) {
+            clearInterval(activeReplyMonitoringInterval);
+            activeReplyMonitoringInterval = null;
+            console.log('Reply monitoring stopped after timeout');
+        }
     }, 10 * 60 * 1000);
 }
 
@@ -3710,7 +3761,21 @@ function setupModeEventListeners() {
     document.getElementById('close-draft-details-modal')?.addEventListener('click', closeDraftDetailsModal);
     document.getElementById('refresh-progress-btn')?.addEventListener('click', async () => {
         const state = getPersistedState();
+        const sentCount = state.sentCount || 0;
         await loadRfqProgress(state);
+        
+        // Restart monitoring if there are sent RFQs
+        if (sentCount > 0) {
+            const materialCodes = state.materialCodes || [];
+            const sentEmails = state.sentEmails || [];
+            if (materialCodes.length > 0 || sentEmails.length > 0) {
+                startReplyMonitoring(sentCount, () => {
+                    const currentState = getPersistedState();
+                    loadRfqProgress(currentState);
+                }, materialCodes, sentEmails);
+            }
+        }
+        
         Helpers.showSuccess('Progress refreshed');
     });
     
