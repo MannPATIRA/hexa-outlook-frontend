@@ -2202,32 +2202,25 @@ textarea.ms-TextField-field {
     border-bottom: 1px solid #edebe9;
     background-color: #faf9f8;
     display: flex;
-    justify-content: space-between;
+    flex-direction: row;
     align-items: center;
-    gap: 12px;
-    flex-wrap: wrap;
+    gap: 8px;
+    flex-wrap: nowrap;
     flex-shrink: 0;
+    position: relative;
 }
 
-.toolbar-left {
+.search-input-group {
     display: flex;
-    align-items: center;
-    gap: 16px;
     flex: 1;
-}
-
-.toolbar-right {
-    display: flex;
+    gap: 4px;
+    min-width: 0;
     align-items: center;
-    gap: 12px;
 }
 
-.search-filter-group {
-    min-width: 200px;
-}
-
-.search-filter-group input {
-    width: 100%;
+.search-input-group input {
+    flex: 1;
+    min-width: 0;
     padding: 6px 10px;
     border: 1px solid #8a8886;
     border-radius: 2px;
@@ -2235,15 +2228,69 @@ textarea.ms-TextField-field {
     transition: border-color 0.15s;
 }
 
-.search-filter-group input:focus {
+.search-input-group input:focus {
     outline: none;
     border-color: #0078d4;
     box-shadow: 0 0 0 1px rgba(0, 120, 212, 0.1);
 }
 
-.sort-filter-group {
+.filters-toggle-btn {
+    min-width: 32px;
+    width: 32px;
+    height: 32px;
+    padding: 0;
     display: flex;
     align-items: center;
+    justify-content: center;
+    border: 1px solid #8a8886;
+    border-radius: 2px;
+    background-color: white;
+    color: #323130;
+    cursor: pointer;
+    transition: all 0.15s;
+    flex-shrink: 0;
+}
+
+.filters-toggle-btn:hover {
+    background-color: #f3f2f1;
+    border-color: #0078d4;
+}
+
+.filters-toggle-btn .ms-Button-icon {
+    font-size: 16px;
+}
+
+.toolbar-filters-dropdown {
+    position: absolute;
+    top: 100%;
+    right: 16px;
+    width: min(300px, calc(100% - 32px));
+    max-height: 60vh;
+    overflow-y: auto;
+    background-color: white;
+    border: 1px solid #edebe9;
+    border-radius: 4px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    z-index: 1000;
+    padding: 12px;
+    margin-top: 4px;
+}
+
+.toolbar-filters-dropdown.hidden {
+    display: none;
+}
+
+.dropdown-section {
+    margin-bottom: 12px;
+}
+
+.dropdown-section:last-child {
+    margin-bottom: 0;
+}
+
+.sort-filter-group {
+    display: flex;
+    flex-direction: column;
     gap: 6px;
 }
 
@@ -2255,22 +2302,25 @@ textarea.ms-TextField-field {
 }
 
 .sort-filter-group select {
+    width: 100%;
     padding: 6px 10px;
     border: 1px solid #8a8886;
     border-radius: 2px;
     font-size: 13px;
     background-color: white;
     cursor: pointer;
-    min-width: 160px;
+    min-width: 0;
 }
 
 .quick-filters {
     display: flex;
+    flex-direction: column;
     gap: 8px;
 }
 
 .filter-btn {
-    padding: 5px 12px;
+    width: 100%;
+    padding: 6px 12px;
     font-size: 12px;
     border: 1px solid #8a8886;
     background-color: white;
@@ -2278,6 +2328,7 @@ textarea.ms-TextField-field {
     border-radius: 2px;
     cursor: pointer;
     transition: all 0.15s;
+    text-align: left;
 }
 
 .filter-btn:hover {
@@ -2293,7 +2344,31 @@ textarea.ms-TextField-field {
 
 .export-group {
     display: flex;
+    flex-direction: column;
     gap: 8px;
+}
+
+.export-group .ms-Button {
+    width: 100%;
+    justify-content: flex-start;
+}
+
+/* Ensure toolbar works at narrow widths */
+@media (max-width: 400px) {
+    .modal-toolbar {
+        padding: 8px 12px;
+    }
+    
+    .search-input-group input {
+        font-size: 14px; /* Prevent zoom on iOS */
+        min-width: 0;
+    }
+    
+    .toolbar-filters-dropdown {
+        right: 12px;
+        width: calc(100% - 24px);
+        max-width: none;
+    }
 }
 
 .quote-comparison-content {
@@ -2304,21 +2379,22 @@ textarea.ms-TextField-field {
 
 .summary-cards-grid {
     display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 20px;
-    padding: 12px 0;
+    flex-direction: column;
+    gap: 8px;
+    padding: 8px 0;
     border-bottom: 1px solid #f3f2f1;
     margin-bottom: 16px;
-    flex-wrap: wrap;
 }
 
 .summary-card {
     display: flex;
     flex-direction: column;
     gap: 4px;
-    flex: 1;
-    min-width: 120px;
+    width: 100%;
+    border: 1px solid #edebe9;
+    border-radius: 4px;
+    background: white;
+    padding: 8px 12px;
 }
 
 .summary-card-icon {
@@ -2332,10 +2408,8 @@ textarea.ms-TextField-field {
 }
 
 .summary-card-label {
-    font-size: 11px;
+    font-size: 12px;
     color: #605e5c;
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
     font-weight: 500;
     line-height: 1.2;
 }
@@ -2352,22 +2426,6 @@ textarea.ms-TextField-field {
     color: #8a8886;
     line-height: 1.2;
     margin-top: 2px;
-}
-
-.card-total .summary-card-value {
-    color: #323130;
-}
-
-.card-best .summary-card-value {
-    color: #107c10;
-}
-
-.card-average .summary-card-value {
-    color: #323130;
-}
-
-.card-fastest .summary-card-value {
-    color: #0078d4;
 }
 
 .comparison-table-container {

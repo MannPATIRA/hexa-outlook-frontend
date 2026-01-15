@@ -604,43 +604,50 @@
                 </div>
                 
                 <div class="modal-toolbar">
-                    <div class="toolbar-left">
-                        <div class="search-filter-group">
-                            <input type="text" id="quote-search-input" class="ms-TextField-field" placeholder="Search suppliers..." />
-                        </div>
-                        <div class="sort-filter-group">
-                            <label for="quote-sort-select">Sort by:</label>
-                            <select id="quote-sort-select" class="ms-Dropdown-select">
-                                <option value="unit_price_asc">Price (Low to High)</option>
-                                <option value="unit_price_desc">Price (High to Low)</option>
-                                <option value="total_price_asc">Total Price (Low to High)</option>
-                                <option value="delivery_asc">Delivery Time (Fastest)</option>
-                                <option value="supplier_asc">Supplier Name (A-Z)</option>
-                                <option value="date_desc">Quote Date (Newest)</option>
-                            </select>
-                        </div>
+                    <div class="search-input-group">
+                        <input type="text" id="quote-search-input" class="ms-TextField-field" placeholder="Search suppliers..." />
+                        <button id="toolbar-filters-toggle" class="filters-toggle-btn" title="Filters">
+                            <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--Filter"></i></span>
+                        </button>
                     </div>
-                    <div class="toolbar-right">
-                        <div class="quick-filters">
-                            <button id="filter-best-price" class="ms-Button ms-Button--default filter-btn">
-                                <span class="ms-Button-label">Best Price</span>
-                            </button>
-                            <button id="filter-fastest-delivery" class="ms-Button ms-Button--default filter-btn">
-                                <span class="ms-Button-label">Fastest Delivery</span>
-                            </button>
-                            <button id="clear-filters" class="ms-Button ms-Button--default filter-btn">
-                                <span class="ms-Button-label">Clear Filters</span>
-                            </button>
+                    <div id="toolbar-filters-dropdown" class="toolbar-filters-dropdown hidden">
+                        <div class="dropdown-section">
+                            <div class="sort-filter-group">
+                                <label for="quote-sort-select">Sort by:</label>
+                                <select id="quote-sort-select" class="ms-Dropdown-select">
+                                    <option value="unit_price_asc">Price (Low to High)</option>
+                                    <option value="unit_price_desc">Price (High to Low)</option>
+                                    <option value="total_price_asc">Total Price (Low to High)</option>
+                                    <option value="delivery_asc">Delivery Time (Fastest)</option>
+                                    <option value="supplier_asc">Supplier Name (A-Z)</option>
+                                    <option value="date_desc">Quote Date (Newest)</option>
+                                </select>
+                            </div>
                         </div>
-                        <div class="export-group">
-                            <button id="export-csv-btn" class="ms-Button ms-Button--default">
-                                <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--Download"></i></span>
-                                <span class="ms-Button-label">Export CSV</span>
-                            </button>
-                            <button id="export-pdf-btn" class="ms-Button ms-Button--default">
-                                <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--PDF"></i></span>
-                                <span class="ms-Button-label">Export PDF</span>
-                            </button>
+                        <div class="dropdown-section">
+                            <div class="quick-filters">
+                                <button id="filter-best-price" class="ms-Button ms-Button--default filter-btn">
+                                    <span class="ms-Button-label">Best Price</span>
+                                </button>
+                                <button id="filter-fastest-delivery" class="ms-Button ms-Button--default filter-btn">
+                                    <span class="ms-Button-label">Fastest Delivery</span>
+                                </button>
+                                <button id="clear-filters" class="ms-Button ms-Button--default filter-btn">
+                                    <span class="ms-Button-label">Clear Filters</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="dropdown-section">
+                            <div class="export-group">
+                                <button id="export-csv-btn" class="ms-Button ms-Button--default">
+                                    <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--Download"></i></span>
+                                    <span class="ms-Button-label">Export CSV</span>
+                                </button>
+                                <button id="export-pdf-btn" class="ms-Button ms-Button--default">
+                                    <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--PDF"></i></span>
+                                    <span class="ms-Button-label">Export PDF</span>
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>

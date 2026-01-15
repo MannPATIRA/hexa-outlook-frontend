@@ -3644,11 +3644,44 @@ function setupModeEventListeners() {
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
             const modal = document.getElementById('quote-comparison-modal');
-            if (modal && !modal.classList.contains('hidden')) {
+            const dropdown = document.getElementById('toolbar-filters-dropdown');
+            
+            // If dropdown is open, close it first
+            if (dropdown && !dropdown.classList.contains('hidden')) {
+                dropdown.classList.add('hidden');
+                e.stopPropagation();
+            } else if (modal && !modal.classList.contains('hidden')) {
                 closeQuoteComparisonModal();
             }
         }
     });
+    
+    // Toolbar filters dropdown toggle
+    const filtersToggle = document.getElementById('toolbar-filters-toggle');
+    const filtersDropdown = document.getElementById('toolbar-filters-dropdown');
+    
+    if (filtersToggle && filtersDropdown) {
+        filtersToggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            filtersDropdown.classList.toggle('hidden');
+        });
+        
+        // Close dropdown when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!filtersDropdown.classList.contains('hidden')) {
+                // Check if click is outside the dropdown and toggle button
+                if (!filtersDropdown.contains(e.target) && 
+                    !filtersToggle.contains(e.target)) {
+                    filtersDropdown.classList.add('hidden');
+                }
+            }
+        });
+        
+        // Prevent dropdown from closing when clicking inside it
+        filtersDropdown.addEventListener('click', (e) => {
+            e.stopPropagation();
+        });
+    }
     
     // Sort dropdown
     document.getElementById('quote-sort-select')?.addEventListener('change', (e) => {
@@ -6171,52 +6204,34 @@ function renderQuoteComparisonModal(quotes) {
 function renderSummaryCards(quotes, container) {
     if (!container) return;
     
-    // Calculate statistics
-    const prices = quotes
-        .map(q => {
-            const price = parseFloat(q.unit_price) || parseFloat(q.total_price) || parseFloat(q.price) || 0;
-            return price > 0 ? price : null;
-        })
-        .filter(p => p !== null && p > 0);
+    // Calculate average unit price using ONLY unit_price (not total_price fallback)
+    const unitPrices = quotes
+        .map(q => parseFloat(q.unit_price))
+        .filter(p => p !== null && p > 0 && !isNaN(p));
+    const averageUnitPrice = unitPrices.length > 0 
+        ? unitPrices.reduce((a, b) => a + b, 0) / unitPrices.length 
+        : null;
     
-    const lowestPrice = prices.length > 0 ? Math.min(...prices) : null;
-    const highestPrice = prices.length > 0 ? Math.max(...prices) : null;
-    const averagePrice = prices.length > 0 ? prices.reduce((a, b) => a + b, 0) / prices.length : null;
-    
-    const lowestQuote = quotes.find(q => {
-        const price = parseFloat(q.unit_price) || parseFloat(q.total_price) || parseFloat(q.price) || 0;
-        return price > 0 && price === lowestPrice;
-    }) || quotes[0];
+    // Get currency from first quote with unit_price, or default to USD
+    const quoteWithCurrency = quotes.find(q => q.unit_price && parseFloat(q.unit_price) > 0) || quotes[0];
+    const currency = quoteWithCurrency?.currency || 'USD';
     
     // Find fastest delivery
     const quotesWithDelivery = quotes.filter(q => q.delivery_time || q.lead_time);
     const fastestQuote = quotesWithDelivery.length > 0 ? quotesWithDelivery[0] : null;
     
     container.innerHTML = `
-        <div class="summary-card card-total">
+        <div class="summary-card">
             <div class="summary-card-content">
-                <div class="summary-card-label">Total Quotes</div>
-                <div class="summary-card-value">${quotes.length}</div>
+                <div class="summary-card-label">Average Unit Price</div>
+                <div class="summary-card-value">${averageUnitPrice ? Helpers.formatCurrency(averageUnitPrice, currency) : 'N/A'}</div>
             </div>
         </div>
-        <div class="summary-card card-best">
-            <div class="summary-card-content">
-                <div class="summary-card-label">Best Price</div>
-                <div class="summary-card-value">${lowestPrice ? Helpers.formatCurrency(lowestPrice, lowestQuote.currency || 'USD') : 'N/A'}</div>
-                <div class="summary-card-subtext">${Helpers.escapeHtml(lowestQuote.supplier_name || '')}</div>
-            </div>
-        </div>
-        <div class="summary-card card-average">
-            <div class="summary-card-content">
-                <div class="summary-card-label">Average Price</div>
-                <div class="summary-card-value">${averagePrice ? Helpers.formatCurrency(averagePrice, lowestQuote.currency || 'USD') : 'N/A'}</div>
-            </div>
-        </div>
-        <div class="summary-card card-fastest">
+        <div class="summary-card">
             <div class="summary-card-content">
                 <div class="summary-card-label">Fastest Delivery</div>
                 <div class="summary-card-value">${fastestQuote ? Helpers.escapeHtml(fastestQuote.delivery_time || fastestQuote.lead_time || 'N/A') : 'N/A'}</div>
-                <div class="summary-card-subtext">${fastestQuote ? Helpers.escapeHtml(fastestQuote.supplier_name || '') : ''}</div>
+                ${fastestQuote && fastestQuote.supplier_name ? `<div class="summary-card-subtext">${Helpers.escapeHtml(fastestQuote.supplier_name)}</div>` : ''}
             </div>
         </div>
     `;
@@ -6618,6 +6633,12 @@ function closeQuoteComparisonModal() {
     const modal = document.getElementById('quote-comparison-modal');
     if (modal) {
         modal.classList.add('hidden');
+    }
+    
+    // Close filters dropdown if open
+    const filtersDropdown = document.getElementById('toolbar-filters-dropdown');
+    if (filtersDropdown) {
+        filtersDropdown.classList.add('hidden');
     }
     
     // Reset state
