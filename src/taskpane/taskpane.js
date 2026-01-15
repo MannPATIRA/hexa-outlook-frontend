@@ -1241,13 +1241,14 @@ async function loadRfqProgress(state) {
                                 
                                 const bodyPreview = email.bodyPreview || '';
                                 const receivedDate = new Date(email.receivedDateTime);
+                                const isNewAfterBaseline = !baselineTime || receivedDate > baselineTime;
                                 
-                                // Count if: (1) after baseline (if exists), OR (2) no baseline (count all)
-                                if (isSupplierReply(email, bodyPreview) && !allReplyIds.has(email.id)) {
-                                    if (!baselineTime || receivedDate > baselineTime) {
-                                        allReplyIds.add(email.id);
-                                        repliesReceived++;
-                                    }
+                                // Only count if: valid reply AND new after baseline AND not already counted
+                                if (isSupplierReply(email, bodyPreview) && 
+                                    isNewAfterBaseline &&
+                                    !allReplyIds.has(email.id)) {
+                                    allReplyIds.add(email.id);
+                                    repliesReceived++;
                                 }
                             }
                         }
@@ -1299,38 +1300,14 @@ async function loadRfqProgress(state) {
                 }
             }
             
-            // Count new emails in sorted folders (after baseline)
-            for (const folder of [...quoteFolders, ...clarificationFolders]) {
-                try {
-                    const baselineCount = baselineFolderCounts[folder.id] || 0;
-                    const folderEmails = await AuthService.graphRequest(
-                        `/me/mailFolders/${folder.id}/messages?$select=id,subject,from,bodyPreview,conversationId,receivedDateTime&$orderby=receivedDateTime desc&$top=100`
-                    );
-                    
-                    if (folderEmails.value) {
-                        for (const email of folderEmails.value) {
-                            const receivedDate = new Date(email.receivedDateTime);
-                            const bodyPreview = email.bodyPreview || '';
-                            
-                            // Count if: (1) in tracked conversation, OR (2) new after baseline
-                            const inTrackedConversation = trackedConversationIds.has(email.conversationId);
-                            const isNewAfterBaseline = !baselineTime || receivedDate > baselineTime;
-                            
-                            if (isSupplierReply(email, bodyPreview) && 
-                                !allReplyIds.has(email.id) &&
-                                (inTrackedConversation || isNewAfterBaseline)) {
-                                allReplyIds.add(email.id);
-                                repliesReceived++;
-                            }
-                        }
-                    }
-                } catch (e) {
-                    console.warn(`Error counting emails in folder ${folder.id}:`, e);
-                }
-            }
+            // Note: We'll count emails in sorted folders as part of the sorted counting logic below
+            // This avoids double counting with Step 1
             
-            // Count replies sorted: emails in sorted folders
+            // Count replies sorted: check ALL tracked replies to see which ones are in sorted folders
             const sortedReplyIds = new Set();
+            
+            // Collect all email IDs that are in sorted folders (these are the sorted emails)
+            const emailsInSortedFolders = new Set();
             for (const folder of [...quoteFolders, ...clarificationFolders]) {
                 try {
                     const folderEmails = await AuthService.graphRequest(
@@ -1341,14 +1318,28 @@ async function loadRfqProgress(state) {
                         for (const email of folderEmails.value) {
                             const receivedDate = new Date(email.receivedDateTime);
                             const bodyPreview = email.bodyPreview || '';
-                            
-                            const inTrackedConversation = trackedConversationIds.has(email.conversationId);
                             const isNewAfterBaseline = !baselineTime || receivedDate > baselineTime;
                             
-                            if (isSupplierReply(email, bodyPreview) && 
-                                (inTrackedConversation || allReplyIds.has(email.id)) &&
-                                isNewAfterBaseline) {
-                                sortedReplyIds.add(email.id);
+                            // Check if this email should be counted as a reply
+                            const inTrackedConversation = trackedConversationIds.has(email.conversationId);
+                            
+                            // Add to sorted folders set if it's a valid reply and new
+                            if (isSupplierReply(email, bodyPreview) && isNewAfterBaseline) {
+                                // Check if this is a tracked reply:
+                                // - In tracked conversation (Step 1 should have found it, but check anyway)
+                                // - OR not yet in allReplyIds (new reply we're discovering)
+                                const isTrackedReply = inTrackedConversation || !allReplyIds.has(email.id);
+                                
+                                if (isTrackedReply) {
+                                    // Add to sorted folders (it's in a folder, so it's sorted)
+                                    emailsInSortedFolders.add(email.id);
+                                    
+                                    // Also count it as received if we haven't already
+                                    if (!allReplyIds.has(email.id)) {
+                                        allReplyIds.add(email.id);
+                                        repliesReceived++;
+                                    }
+                                }
                             }
                         }
                     }
@@ -1356,9 +1347,19 @@ async function loadRfqProgress(state) {
                     console.warn(`Error checking sorted folder ${folder.id}:`, e);
                 }
             }
+            
+            // Now count how many of our tracked replies are in sorted folders
+            // This ensures we only count replies that are both received AND sorted
+            for (const replyId of allReplyIds) {
+                if (emailsInSortedFolders.has(replyId)) {
+                    sortedReplyIds.add(replyId);
+                }
+            }
+            
             repliesSorted = sortedReplyIds.size;
             
             // Step 3: Count RFQ-related emails in inbox (not yet sorted, after baseline)
+            // IMPORTANT: Only count emails NOT in tracked conversations (Step 1 already counted those)
             try {
                 const inboxReplies = await AuthService.graphRequest(
                     `/me/mailFolders/inbox/messages?$filter=contains(subject,'RFQ')&$top=100&$select=id,subject,from,bodyPreview,conversationId,receivedDateTime&$orderby=receivedDateTime desc`
@@ -1369,15 +1370,17 @@ async function loadRfqProgress(state) {
                         const receivedDate = new Date(email.receivedDateTime);
                         const bodyPreview = email.bodyPreview || '';
                         
+                        // Only count if: NOT in tracked conversation (already counted in Step 1) AND new after baseline
                         const inTrackedConversation = trackedConversationIds.has(email.conversationId);
                         const isNewAfterBaseline = !baselineTime || receivedDate > baselineTime;
                         
                         if (isSupplierReply(email, bodyPreview) && 
                             !allReplyIds.has(email.id) &&
-                            (inTrackedConversation || isNewAfterBaseline)) {
+                            !inTrackedConversation &&  // Skip if already counted in Step 1
+                            isNewAfterBaseline) {
                             allReplyIds.add(email.id);
                             repliesReceived++;
-                            // Not sorted yet
+                            // Not sorted yet (still in inbox)
                         }
                     }
                 }
@@ -2791,7 +2794,7 @@ function startReplyMonitoring(totalSent, updateProgressCallback, materialCodes =
                     try {
                         const escapedConvId = conversationId.replace(/'/g, "''").replace(/\\/g, '\\\\');
                         const conversationEmails = await AuthService.graphRequest(
-                            `/me/messages?$filter=conversationId eq '${escapedConvId}'&$select=id,subject,from,bodyPreview,conversationId,receivedDateTime&$top=50`
+                            `/me/messages?$filter=conversationId eq '${escapedConvId}'&$select=id,subject,from,bodyPreview,conversationId,receivedDateTime,parentFolderId&$top=50`
                         );
                         
                         if (conversationEmails.value) {
@@ -2800,16 +2803,18 @@ function startReplyMonitoring(totalSent, updateProgressCallback, materialCodes =
                                 const isTrackedSent = trackedSentEmails.some(e => e.id === email.id);
                                 if (isTrackedSent) continue;
                                 
-                                // Check if it's a new reply (after baseline or received after sent email)
+                                // Check if it's a new reply (after baseline timestamp)
                                 const receivedDate = new Date(email.receivedDateTime);
                                 const bodyPreview = email.bodyPreview || '';
+                                const isNewAfterBaseline = !baselineTime || receivedDate > baselineTime;
                                 
-                                if (isSupplierReply(email, bodyPreview) && !allReplyIds.has(email.id)) {
+                                // Only count if it's a valid reply AND new (after baseline)
+                                if (isSupplierReply(email, bodyPreview) && 
+                                    isNewAfterBaseline &&
+                                    !allReplyIds.has(email.id)) {
                                     allReplyIds.add(email.id);
                                     repliesReceived++;
-                                    
-                                    // Check if it's in a sorted folder (use baseline count)
-                                    // We'll check this in Step 2
+                                    // Note: We'll check if it's sorted in Step 2 below
                                 }
                             }
                         }
@@ -2870,27 +2875,30 @@ function startReplyMonitoring(totalSent, updateProgressCallback, materialCodes =
             // But avoid double counting - prioritize conversation-based results
             
             // Step 3: Count RFQ-related emails in inbox (not yet sorted, after baseline)
+            // IMPORTANT: Only count emails NOT in tracked conversations (Step 1 already counted those)
+            // This is a fallback for emails that might have arrived but aren't in conversation threads yet
             try {
                 const inboxReplies = await AuthService.graphRequest(
                     `/me/mailFolders/inbox/messages?$filter=contains(subject,'RFQ')&$top=100&$select=id,subject,from,bodyPreview,conversationId,receivedDateTime&$orderby=receivedDateTime desc`
                 );
                 
                 if (inboxReplies.value) {
-                    const baselineInboxCount = baselineFolderCounts['inbox-rfq'] || 0;
-                    
                     for (const email of inboxReplies.value) {
                         const receivedDate = new Date(email.receivedDateTime);
                         
-                        // Count if: (1) in tracked conversation, OR (2) new after baseline
+                        // Only count if: NOT in tracked conversation (already counted in Step 1) AND new after baseline
                         const inTrackedConversation = trackedConversationIds.has(email.conversationId);
                         const isNewAfterBaseline = !baselineTime || receivedDate > baselineTime;
                         
-                        if ((inTrackedConversation || isNewAfterBaseline) && !allReplyIds.has(email.id)) {
+                        // Skip if already in tracked conversation (Step 1 handled it) or already counted
+                        if (!inTrackedConversation && 
+                            isNewAfterBaseline && 
+                            !allReplyIds.has(email.id)) {
                             const bodyPreview = email.bodyPreview || '';
                             if (isSupplierReply(email, bodyPreview)) {
                                 allReplyIds.add(email.id);
                                 repliesReceived++;
-                                // Not sorted yet, so don't increment repliesSorted
+                                // Not sorted yet (still in inbox)
                             }
                         }
                     }
@@ -2899,10 +2907,13 @@ function startReplyMonitoring(totalSent, updateProgressCallback, materialCodes =
                 console.warn('Error getting inbox replies:', e);
             }
             
-            // Calculate replies sorted: count replies that are in sorted folders
-            // A reply is "sorted" if it's in a Quotes or Clarification folder AND it's one of our tracked replies
+            // Calculate replies sorted: check ALL tracked replies to see which ones are in sorted folders
+            // A reply is "sorted" if it's one of our tracked replies AND it's in a Quotes or Clarification folder
             repliesSorted = 0;
             const sortedReplyIds = new Set();
+            
+            // First, get all email IDs that are in sorted folders (for quick lookup)
+            const emailsInSortedFolders = new Set();
             for (const folder of [...quoteFolders, ...clarificationFolders]) {
                 try {
                     const folderEmails = await AuthService.graphRequest(
@@ -2914,58 +2925,38 @@ function startReplyMonitoring(totalSent, updateProgressCallback, materialCodes =
                             const receivedDate = new Date(email.receivedDateTime);
                             const bodyPreview = email.bodyPreview || '';
                             
-                            // Only count if it's a tracked reply (in conversation OR already counted)
+                            // Check if this email is one of our tracked replies
                             const inTrackedConversation = trackedConversationIds.has(email.conversationId);
                             const isTrackedReply = inTrackedConversation || allReplyIds.has(email.id);
                             const isNewAfterBaseline = !baselineTime || receivedDate > baselineTime;
                             
+                            // If it's a tracked reply and new after baseline, it's sorted (in folder)
                             if (isSupplierReply(email, bodyPreview) && 
                                 isTrackedReply &&
                                 isNewAfterBaseline) {
-                                sortedReplyIds.add(email.id);
+                                emailsInSortedFolders.add(email.id);
+                                
+                                // Also add any new replies found here that we haven't counted yet
+                                // (only if not in tracked conversation - Step 1 already handled those)
+                                if (!inTrackedConversation && !allReplyIds.has(email.id)) {
+                                    allReplyIds.add(email.id);
+                                    repliesReceived++;
+                                }
                             }
                         }
                     }
                 } catch (e) {
-                    // Ignore errors
                     console.warn(`Error checking sorted folder ${folder.id}:`, e);
                 }
             }
-            repliesSorted = sortedReplyIds.size;
             
-            // Also count new emails in folders that might not be in conversations yet (fallback)
-            // These are emails that appeared after baseline but aren't in tracked conversations
-            for (const folder of [...quoteFolders, ...clarificationFolders]) {
-                try {
-                    const folderEmails = await AuthService.graphRequest(
-                        `/me/mailFolders/${folder.id}/messages?$select=id,conversationId,receivedDateTime,subject,from,bodyPreview&$orderby=receivedDateTime desc&$top=100`
-                    );
-                    
-                    if (folderEmails.value) {
-                        for (const email of folderEmails.value) {
-                            const receivedDate = new Date(email.receivedDateTime);
-                            const bodyPreview = email.bodyPreview || '';
-                            
-                            // Count if: new after baseline, not in tracked conversation, valid reply
-                            const inTrackedConversation = trackedConversationIds.has(email.conversationId);
-                            const isNewAfterBaseline = !baselineTime || receivedDate > baselineTime;
-                            
-                            if (!inTrackedConversation && 
-                                isNewAfterBaseline &&
-                                isSupplierReply(email, bodyPreview) &&
-                                !allReplyIds.has(email.id) &&
-                                materialCodes.length > 0) {
-                                // This might be a reply we haven't tracked yet - add it
-                                allReplyIds.add(email.id);
-                                repliesReceived++;
-                                sortedReplyIds.add(email.id);
-                            }
-                        }
-                    }
-                } catch (e) {
-                    console.warn(`Error counting new emails in folder ${folder.id}:`, e);
+            // Count how many of our tracked replies are in sorted folders
+            for (const replyId of allReplyIds) {
+                if (emailsInSortedFolders.has(replyId)) {
+                    sortedReplyIds.add(replyId);
                 }
             }
+            
             repliesSorted = sortedReplyIds.size;
             
             console.log(`Reply monitoring: ${repliesReceived} received, ${repliesSorted} sorted out of ${totalSent} sent`);
