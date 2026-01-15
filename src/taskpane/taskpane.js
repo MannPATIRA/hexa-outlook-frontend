@@ -878,7 +878,7 @@ async function showDraftMode(context) {
     // Update header title
     const headerTitle = document.getElementById('header-title');
     if (headerTitle) {
-        headerTitle.textContent = 'RFQ Drafts';
+        headerTitle.textContent = 'RFQ Draft Editor';
     }
 
     // Load pending RFQ drafts
