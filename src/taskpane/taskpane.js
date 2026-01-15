@@ -1123,29 +1123,76 @@ async function loadRfqProgress(state) {
     };
     
     // Helper to check if email is an undeliverable/bounceback
-    const isUndeliverable = (email) => {
+    const isUndeliverable = (email, bodyPreview = '') => {
         const subject = (email.subject || '').toLowerCase();
         const from = (email.from?.emailAddress?.address || '').toLowerCase();
         const fromName = (email.from?.emailAddress?.name || '').toLowerCase();
+        const body = (bodyPreview || '').toLowerCase();
         
+        // Subject/from checks (existing)
         if (subject.includes('undeliverable') || 
             subject.includes('delivery failure') ||
             subject.includes('delivery has failed') ||
             subject.includes('mail delivery failed') ||
             from.includes('postmaster') ||
             from.includes('mailer-daemon') ||
-            from.includes('noreply') && subject.includes('failed') ||
+            (from.includes('noreply') && subject.includes('failed')) ||
             fromName.includes('postmaster') ||
             fromName.includes('mailer-daemon')) {
             return true;
         }
+        
+        // NEW: Body content checks for bounceback patterns
+        if (body.includes('message undeliverable') ||
+            body.includes('delivery has failed') ||
+            body.includes('returned mail') ||
+            body.includes('mail delivery subsystem') ||
+            body.includes('delivery status notification') ||
+            body.includes('this is an automatically generated delivery status notification') ||
+            body.includes('delivery to the following recipient failed') ||
+            body.includes('could not be delivered')) {
+            return true;
+        }
+        
         return false;
     };
     
     // Helper to check if email is a real supplier reply
-    const isSupplierReply = (email) => {
+    const isSupplierReply = (email, bodyPreview = '') => {
         const subject = (email.subject || '').toLowerCase();
-        return subject.includes('rfq') && !isUndeliverable(email);
+        
+        // Must contain RFQ in subject
+        if (!subject.includes('rfq')) {
+            return false;
+        }
+        
+        // Must not be undeliverable
+        if (isUndeliverable(email, bodyPreview)) {
+            return false;
+        }
+        
+        // NEW: Must have actual content (not just bounceback)
+        const body = (bodyPreview || '').trim();
+        if (body.length < 50) {
+            return false; // Too short to be a real reply
+        }
+        
+        // Check body doesn't contain bounceback patterns
+        const bouncePatterns = [
+            'delivery failed',
+            'undeliverable',
+            'returned mail',
+            'mail delivery subsystem',
+            'delivery status notification',
+            'could not be delivered',
+            'permanent failure',
+            'temporary failure'
+        ];
+        if (bouncePatterns.some(pattern => body.includes(pattern))) {
+            return false;
+        }
+        
+        return true;
     };
     
     // Try to count actual replies received
@@ -1155,7 +1202,7 @@ async function loadRfqProgress(state) {
     
     if (AuthService.isSignedIn()) {
         try {
-            // Step 1: Get all mail folders to find Quotes and Clarification folders
+            // Step 1: Get all mail folders and find material code folders first
             let quoteFolders = [];
             let clarificationFolders = [];
             
@@ -1164,12 +1211,45 @@ async function loadRfqProgress(state) {
             );
             
             if (allFolders.value) {
+                // First find all material code folders (MAT-XXXXX pattern)
+                const materialFolders = [];
+                for (const folder of allFolders.value) {
+                    if (/^MAT-\d+$/i.test(folder.displayName)) {
+                        materialFolders.push(folder);
+                    }
+                }
+                
+                // Then find Quotes/Clarification folders within each material folder
+                for (const materialFolder of materialFolders) {
+                    try {
+                        const materialSubfolders = await AuthService.graphRequest(
+                            `/me/mailFolders/${materialFolder.id}/childFolders?$select=id,displayName&$top=20`
+                        );
+                        
+                        if (materialSubfolders.value) {
+                            for (const subfolder of materialSubfolders.value) {
+                                const name = (subfolder.displayName || '').toLowerCase();
+                                if (name.includes('quote') && !name.includes('sent')) {
+                                    quoteFolders.push(subfolder.id);
+                                }
+                                if (name.includes('clarification') && !name.includes('awaiting')) {
+                                    clarificationFolders.push(subfolder.id);
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        // Ignore errors fetching subfolders for a specific material folder
+                        console.warn(`Error fetching subfolders for ${materialFolder.displayName}:`, e);
+                    }
+                }
+                
+                // Also check for top-level folders as fallback (in case structure is different)
                 for (const folder of allFolders.value) {
                     const folderName = (folder.displayName || '').toLowerCase();
-                    if (folderName.includes('quote') && !folderName.includes('sent')) {
+                    if (folderName.includes('quote') && !folderName.includes('sent') && !quoteFolders.includes(folder.id)) {
                         quoteFolders.push(folder.id);
                     }
-                    if (folderName.includes('clarification') && !folderName.includes('awaiting')) {
+                    if (folderName.includes('clarification') && !folderName.includes('awaiting') && !clarificationFolders.includes(folder.id)) {
                         clarificationFolders.push(folder.id);
                     }
                 }
@@ -1179,11 +1259,12 @@ async function loadRfqProgress(state) {
             for (const folderId of quoteFolders) {
                 try {
                     const folderEmails = await AuthService.graphRequest(
-                        `/me/mailFolders/${folderId}/messages?$select=id,subject,from&$top=100`
+                        `/me/mailFolders/${folderId}/messages?$select=id,subject,from,bodyPreview&$top=100`
                     );
                     if (folderEmails.value) {
                         for (const email of folderEmails.value) {
-                            if (isSupplierReply(email) && !allReplyIds.has(email.id)) {
+                            const bodyPreview = email.bodyPreview || '';
+                            if (isSupplierReply(email, bodyPreview) && !allReplyIds.has(email.id)) {
                                 allReplyIds.add(email.id);
                                 repliesReceived++;
                                 repliesSorted++;
@@ -1191,18 +1272,19 @@ async function loadRfqProgress(state) {
                         }
                     }
                 } catch (e) {
-                    // Ignore errors
+                    console.warn(`Error counting emails in quote folder ${folderId}:`, e);
                 }
             }
             
             for (const folderId of clarificationFolders) {
                 try {
                     const folderEmails = await AuthService.graphRequest(
-                        `/me/mailFolders/${folderId}/messages?$select=id,subject,from&$top=100`
+                        `/me/mailFolders/${folderId}/messages?$select=id,subject,from,bodyPreview&$top=100`
                     );
                     if (folderEmails.value) {
                         for (const email of folderEmails.value) {
-                            if (isSupplierReply(email) && !allReplyIds.has(email.id)) {
+                            const bodyPreview = email.bodyPreview || '';
+                            if (isSupplierReply(email, bodyPreview) && !allReplyIds.has(email.id)) {
                                 allReplyIds.add(email.id);
                                 repliesReceived++;
                                 repliesSorted++;
@@ -1210,23 +1292,28 @@ async function loadRfqProgress(state) {
                         }
                     }
                 } catch (e) {
-                    // Ignore errors
+                    console.warn(`Error counting emails in clarification folder ${folderId}:`, e);
                 }
             }
             
             // Step 3: Count RFQ-related emails in inbox (not yet sorted)
-            const inboxReplies = await AuthService.graphRequest(
-                `/me/mailFolders/inbox/messages?$filter=contains(subject,'RFQ')&$top=100&$select=id,subject,from&$orderby=receivedDateTime desc`
-            );
-            
-            if (inboxReplies.value) {
-                for (const email of inboxReplies.value) {
-                    if (isSupplierReply(email) && !allReplyIds.has(email.id)) {
-                        allReplyIds.add(email.id);
-                        repliesReceived++;
-                        // Not sorted yet, so don't increment repliesSorted
+            try {
+                const inboxReplies = await AuthService.graphRequest(
+                    `/me/mailFolders/inbox/messages?$filter=contains(subject,'RFQ')&$top=100&$select=id,subject,from,bodyPreview&$orderby=receivedDateTime desc`
+                );
+                
+                if (inboxReplies.value) {
+                    for (const email of inboxReplies.value) {
+                        const bodyPreview = email.bodyPreview || '';
+                        if (isSupplierReply(email, bodyPreview) && !allReplyIds.has(email.id)) {
+                            allReplyIds.add(email.id);
+                            repliesReceived++;
+                            // Not sorted yet, so don't increment repliesSorted
+                        }
                     }
                 }
+            } catch (e) {
+                console.warn('Error getting inbox replies:', e);
             }
             
         } catch (err) {
@@ -2337,31 +2424,76 @@ function startReplyMonitoring(totalSent, updateProgressCallback) {
     const repliesSortedProgress = document.getElementById('replies-sorted-progress');
     
     // Helper to check if email is an undeliverable/bounceback
-    const isUndeliverable = (email) => {
+    const isUndeliverable = (email, bodyPreview = '') => {
         const subject = (email.subject || '').toLowerCase();
         const from = (email.from?.emailAddress?.address || '').toLowerCase();
         const fromName = (email.from?.emailAddress?.name || '').toLowerCase();
+        const body = (bodyPreview || '').toLowerCase();
         
-        // Check for common bounceback indicators
+        // Subject/from checks (existing)
         if (subject.includes('undeliverable') || 
             subject.includes('delivery failure') ||
             subject.includes('delivery has failed') ||
             subject.includes('mail delivery failed') ||
             from.includes('postmaster') ||
             from.includes('mailer-daemon') ||
-            from.includes('noreply') && subject.includes('failed') ||
+            (from.includes('noreply') && subject.includes('failed')) ||
             fromName.includes('postmaster') ||
             fromName.includes('mailer-daemon')) {
             return true;
         }
+        
+        // NEW: Body content checks for bounceback patterns
+        if (body.includes('message undeliverable') ||
+            body.includes('delivery has failed') ||
+            body.includes('returned mail') ||
+            body.includes('mail delivery subsystem') ||
+            body.includes('delivery status notification') ||
+            body.includes('this is an automatically generated delivery status notification') ||
+            body.includes('delivery to the following recipient failed') ||
+            body.includes('could not be delivered')) {
+            return true;
+        }
+        
         return false;
     };
     
     // Helper to check if email is a real supplier reply
-    const isSupplierReply = (email) => {
+    const isSupplierReply = (email, bodyPreview = '') => {
         const subject = (email.subject || '').toLowerCase();
-        // Must contain RFQ in subject and not be undeliverable
-        return subject.includes('rfq') && !isUndeliverable(email);
+        
+        // Must contain RFQ in subject
+        if (!subject.includes('rfq')) {
+            return false;
+        }
+        
+        // Must not be undeliverable
+        if (isUndeliverable(email, bodyPreview)) {
+            return false;
+        }
+        
+        // NEW: Must have actual content (not just bounceback)
+        const body = (bodyPreview || '').trim();
+        if (body.length < 50) {
+            return false; // Too short to be a real reply
+        }
+        
+        // Check body doesn't contain bounceback patterns
+        const bouncePatterns = [
+            'delivery failed',
+            'undeliverable',
+            'returned mail',
+            'mail delivery subsystem',
+            'delivery status notification',
+            'could not be delivered',
+            'permanent failure',
+            'temporary failure'
+        ];
+        if (bouncePatterns.some(pattern => body.includes(pattern))) {
+            return false;
+        }
+        
+        return true;
     };
     
     let checkInterval = setInterval(async () => {
@@ -2370,7 +2502,7 @@ function startReplyMonitoring(totalSent, updateProgressCallback) {
             let repliesSorted = 0;
             const allReplyIds = new Set(); // Track unique reply IDs
             
-            // Step 1: Get all mail folders to find Quotes and Clarification folders
+            // Step 1: Get all mail folders and find material code folders first
             let quoteFolders = [];
             let clarificationFolders = [];
             
@@ -2380,12 +2512,45 @@ function startReplyMonitoring(totalSent, updateProgressCallback) {
                 );
                 
                 if (allFolders.value) {
+                    // First find all material code folders (MAT-XXXXX pattern)
+                    const materialFolders = [];
+                    for (const folder of allFolders.value) {
+                        if (/^MAT-\d+$/i.test(folder.displayName)) {
+                            materialFolders.push(folder);
+                        }
+                    }
+                    
+                    // Then find Quotes/Clarification folders within each material folder
+                    for (const materialFolder of materialFolders) {
+                        try {
+                            const materialSubfolders = await AuthService.graphRequest(
+                                `/me/mailFolders/${materialFolder.id}/childFolders?$select=id,displayName&$top=20`
+                            );
+                            
+                            if (materialSubfolders.value) {
+                                for (const subfolder of materialSubfolders.value) {
+                                    const name = (subfolder.displayName || '').toLowerCase();
+                                    if (name.includes('quote') && !name.includes('sent')) {
+                                        quoteFolders.push(subfolder.id);
+                                    }
+                                    if (name.includes('clarification') && !name.includes('awaiting')) {
+                                        clarificationFolders.push(subfolder.id);
+                                    }
+                                }
+                            }
+                        } catch (e) {
+                            // Ignore errors fetching subfolders for a specific material folder
+                            console.warn(`Error fetching subfolders for ${materialFolder.displayName}:`, e);
+                        }
+                    }
+                    
+                    // Also check for top-level folders as fallback (in case structure is different)
                     for (const folder of allFolders.value) {
                         const folderName = (folder.displayName || '').toLowerCase();
-                        if (folderName.includes('quote') && !folderName.includes('sent')) {
+                        if (folderName.includes('quote') && !folderName.includes('sent') && !quoteFolders.includes(folder.id)) {
                             quoteFolders.push(folder.id);
                         }
-                        if (folderName.includes('clarification') && !folderName.includes('awaiting')) {
+                        if (folderName.includes('clarification') && !folderName.includes('awaiting') && !clarificationFolders.includes(folder.id)) {
                             clarificationFolders.push(folder.id);
                         }
                     }
@@ -2398,11 +2563,12 @@ function startReplyMonitoring(totalSent, updateProgressCallback) {
             for (const folderId of quoteFolders) {
                 try {
                     const folderEmails = await AuthService.graphRequest(
-                        `/me/mailFolders/${folderId}/messages?$select=id,subject,from&$top=100`
+                        `/me/mailFolders/${folderId}/messages?$select=id,subject,from,bodyPreview&$top=100`
                     );
                     if (folderEmails.value) {
                         for (const email of folderEmails.value) {
-                            if (isSupplierReply(email) && !allReplyIds.has(email.id)) {
+                            const bodyPreview = email.bodyPreview || '';
+                            if (isSupplierReply(email, bodyPreview) && !allReplyIds.has(email.id)) {
                                 allReplyIds.add(email.id);
                                 repliesReceived++;
                                 repliesSorted++;
@@ -2417,11 +2583,12 @@ function startReplyMonitoring(totalSent, updateProgressCallback) {
             for (const folderId of clarificationFolders) {
                 try {
                     const folderEmails = await AuthService.graphRequest(
-                        `/me/mailFolders/${folderId}/messages?$select=id,subject,from&$top=100`
+                        `/me/mailFolders/${folderId}/messages?$select=id,subject,from,bodyPreview&$top=100`
                     );
                     if (folderEmails.value) {
                         for (const email of folderEmails.value) {
-                            if (isSupplierReply(email) && !allReplyIds.has(email.id)) {
+                            const bodyPreview = email.bodyPreview || '';
+                            if (isSupplierReply(email, bodyPreview) && !allReplyIds.has(email.id)) {
                                 allReplyIds.add(email.id);
                                 repliesReceived++;
                                 repliesSorted++;
@@ -2436,12 +2603,13 @@ function startReplyMonitoring(totalSent, updateProgressCallback) {
             // Step 3: Count RFQ-related emails in inbox (not yet sorted)
             try {
                 const inboxReplies = await AuthService.graphRequest(
-                    `/me/mailFolders/inbox/messages?$filter=contains(subject,'RFQ')&$top=100&$select=id,subject,from&$orderby=receivedDateTime desc`
+                    `/me/mailFolders/inbox/messages?$filter=contains(subject,'RFQ')&$top=100&$select=id,subject,from,bodyPreview&$orderby=receivedDateTime desc`
                 );
                 
                 if (inboxReplies.value) {
                     for (const email of inboxReplies.value) {
-                        if (isSupplierReply(email) && !allReplyIds.has(email.id)) {
+                        const bodyPreview = email.bodyPreview || '';
+                        if (isSupplierReply(email, bodyPreview) && !allReplyIds.has(email.id)) {
                             allReplyIds.add(email.id);
                             repliesReceived++;
                             // Not sorted yet, so don't increment repliesSorted
