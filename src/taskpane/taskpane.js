@@ -1115,6 +1115,9 @@ async function loadRfqProgress(state) {
     const sentCount = state.sentCount || 0;
     const autoRepliesScheduled = state.autoRepliesScheduled || 0;
     const materialCodes = state.materialCodes || [];
+    const trackedSentEmails = state.sentEmails || [];
+    const baselineTimestamp = state.baselineTimestamp || null;
+    const baselineFolderCounts = state.baselineFolderCounts || {};
     
     // Warn if no material codes tracked (legacy state)
     if (materialCodes.length === 0 && sentCount > 0) {
@@ -1122,6 +1125,17 @@ async function loadRfqProgress(state) {
     } else if (materialCodes.length > 0) {
         console.log(`Filtering replies for material codes: ${materialCodes.join(', ')}`);
     }
+    
+    if (trackedSentEmails.length > 0) {
+        console.log(`Tracking replies for ${trackedSentEmails.length} sent emails`);
+    }
+    
+    // Get tracked conversation IDs
+    const trackedConversationIds = new Set(
+        trackedSentEmails.map(e => e.conversationId).filter(Boolean)
+    );
+    
+    const baselineTime = baselineTimestamp ? new Date(baselineTimestamp) : null;
     
     // Helper function to set progress item state
     const setProgressItemState = (itemElement, state) => {
@@ -1210,7 +1224,41 @@ async function loadRfqProgress(state) {
     
     if (AuthService.isSignedIn()) {
         try {
-            // Step 1: Get all mail folders and find material code folders first
+            // Step 1: Find replies by conversation ID (PRIMARY METHOD)
+            if (trackedConversationIds.size > 0) {
+                for (const conversationId of trackedConversationIds) {
+                    try {
+                        const escapedConvId = conversationId.replace(/'/g, "''").replace(/\\/g, '\\\\');
+                        const conversationEmails = await AuthService.graphRequest(
+                            `/me/messages?$filter=conversationId eq '${escapedConvId}'&$select=id,subject,from,bodyPreview,conversationId,receivedDateTime&$top=50`
+                        );
+                        
+                        if (conversationEmails.value) {
+                            for (const email of conversationEmails.value) {
+                                // Skip the sent emails themselves
+                                const isTrackedSent = trackedSentEmails.some(e => e.id === email.id);
+                                if (isTrackedSent) continue;
+                                
+                                const bodyPreview = email.bodyPreview || '';
+                                const receivedDate = new Date(email.receivedDateTime);
+                                const isNewAfterBaseline = !baselineTime || receivedDate > baselineTime;
+                                
+                                // Only count if: valid reply AND new after baseline AND not already counted
+                                if (isSupplierReply(email, bodyPreview) && 
+                                    isNewAfterBaseline &&
+                                    !allReplyIds.has(email.id)) {
+                                    allReplyIds.add(email.id);
+                                    repliesReceived++;
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.warn(`Error finding replies for conversation ${conversationId}:`, e);
+                    }
+                }
+            }
+            
+            // Step 2: Get folders and count new emails (FALLBACK/SUPPLEMENT)
             let quoteFolders = [];
             let clarificationFolders = [];
             
@@ -1219,20 +1267,16 @@ async function loadRfqProgress(state) {
             );
             
             if (allFolders.value) {
-                // First find material code folders (MAT-XXXXX pattern)
-                // Only include folders for material codes that were sent in the current batch
                 const materialFolders = [];
                 for (const folder of allFolders.value) {
                     if (/^MAT-\d+$/i.test(folder.displayName)) {
                         const folderCode = folder.displayName.toUpperCase();
-                        // Only include if materialCodes is empty (legacy/fallback) or if this material code was tracked
                         if (materialCodes.length === 0 || materialCodes.includes(folderCode)) {
                             materialFolders.push(folder);
                         }
                     }
                 }
                 
-                // Then find Quotes/Clarification folders within each material folder
                 for (const materialFolder of materialFolders) {
                     try {
                         const materialSubfolders = await AuthService.graphRequest(
@@ -1243,85 +1287,100 @@ async function loadRfqProgress(state) {
                             for (const subfolder of materialSubfolders.value) {
                                 const name = (subfolder.displayName || '').toLowerCase();
                                 if (name.includes('quote') && !name.includes('sent')) {
-                                    quoteFolders.push(subfolder.id);
+                                    quoteFolders.push({ id: subfolder.id, displayName: subfolder.displayName });
                                 }
                                 if (name.includes('clarification') && !name.includes('awaiting')) {
-                                    clarificationFolders.push(subfolder.id);
+                                    clarificationFolders.push({ id: subfolder.id, displayName: subfolder.displayName });
                                 }
                             }
                         }
                     } catch (e) {
-                        // Ignore errors fetching subfolders for a specific material folder
-                        console.warn(`Error fetching subfolders for ${materialFolder.displayName}:`, e);
-                    }
-                }
-                
-                // Also check for top-level folders as fallback (in case structure is different)
-                for (const folder of allFolders.value) {
-                    const folderName = (folder.displayName || '').toLowerCase();
-                    if (folderName.includes('quote') && !folderName.includes('sent') && !quoteFolders.includes(folder.id)) {
-                        quoteFolders.push(folder.id);
-                    }
-                    if (folderName.includes('clarification') && !folderName.includes('awaiting') && !clarificationFolders.includes(folder.id)) {
-                        clarificationFolders.push(folder.id);
+                        console.warn(`Error fetching subfolders:`, e);
                     }
                 }
             }
             
-            // Step 2: Count emails in sorted folders (Quotes and Clarifications)
-            for (const folderId of quoteFolders) {
+            // Note: We'll count emails in sorted folders as part of the sorted counting logic below
+            // This avoids double counting with Step 1
+            
+            // Count replies sorted: check ALL tracked replies to see which ones are in sorted folders
+            const sortedReplyIds = new Set();
+            
+            // Collect all email IDs that are in sorted folders (these are the sorted emails)
+            const emailsInSortedFolders = new Set();
+            for (const folder of [...quoteFolders, ...clarificationFolders]) {
                 try {
                     const folderEmails = await AuthService.graphRequest(
-                        `/me/mailFolders/${folderId}/messages?$select=id,subject,from,bodyPreview&$top=100`
+                        `/me/mailFolders/${folder.id}/messages?$select=id,conversationId,receivedDateTime,subject,from,bodyPreview&$top=100`
                     );
+                    
                     if (folderEmails.value) {
                         for (const email of folderEmails.value) {
+                            const receivedDate = new Date(email.receivedDateTime);
                             const bodyPreview = email.bodyPreview || '';
-                            if (isSupplierReply(email, bodyPreview) && !allReplyIds.has(email.id)) {
-                                allReplyIds.add(email.id);
-                                repliesReceived++;
-                                repliesSorted++;
+                            const isNewAfterBaseline = !baselineTime || receivedDate > baselineTime;
+                            
+                            // Check if this email should be counted as a reply
+                            const inTrackedConversation = trackedConversationIds.has(email.conversationId);
+                            
+                            // Add to sorted folders set if it's a valid reply and new
+                            if (isSupplierReply(email, bodyPreview) && isNewAfterBaseline) {
+                                // Check if this is a tracked reply:
+                                // - In tracked conversation (Step 1 should have found it, but check anyway)
+                                // - OR not yet in allReplyIds (new reply we're discovering)
+                                const isTrackedReply = inTrackedConversation || !allReplyIds.has(email.id);
+                                
+                                if (isTrackedReply) {
+                                    // Add to sorted folders (it's in a folder, so it's sorted)
+                                    emailsInSortedFolders.add(email.id);
+                                    
+                                    // Also count it as received if we haven't already
+                                    if (!allReplyIds.has(email.id)) {
+                                        allReplyIds.add(email.id);
+                                        repliesReceived++;
+                                    }
+                                }
                             }
                         }
                     }
                 } catch (e) {
-                    console.warn(`Error counting emails in quote folder ${folderId}:`, e);
+                    console.warn(`Error checking sorted folder ${folder.id}:`, e);
                 }
             }
             
-            for (const folderId of clarificationFolders) {
-                try {
-                    const folderEmails = await AuthService.graphRequest(
-                        `/me/mailFolders/${folderId}/messages?$select=id,subject,from,bodyPreview&$top=100`
-                    );
-                    if (folderEmails.value) {
-                        for (const email of folderEmails.value) {
-                            const bodyPreview = email.bodyPreview || '';
-                            if (isSupplierReply(email, bodyPreview) && !allReplyIds.has(email.id)) {
-                                allReplyIds.add(email.id);
-                                repliesReceived++;
-                                repliesSorted++;
-                            }
-                        }
-                    }
-                } catch (e) {
-                    console.warn(`Error counting emails in clarification folder ${folderId}:`, e);
+            // Now count how many of our tracked replies are in sorted folders
+            // This ensures we only count replies that are both received AND sorted
+            for (const replyId of allReplyIds) {
+                if (emailsInSortedFolders.has(replyId)) {
+                    sortedReplyIds.add(replyId);
                 }
             }
             
-            // Step 3: Count RFQ-related emails in inbox (not yet sorted)
+            repliesSorted = sortedReplyIds.size;
+            
+            // Step 3: Count RFQ-related emails in inbox (not yet sorted, after baseline)
+            // IMPORTANT: Only count emails NOT in tracked conversations (Step 1 already counted those)
             try {
                 const inboxReplies = await AuthService.graphRequest(
-                    `/me/mailFolders/inbox/messages?$filter=contains(subject,'RFQ')&$top=100&$select=id,subject,from,bodyPreview&$orderby=receivedDateTime desc`
+                    `/me/mailFolders/inbox/messages?$filter=contains(subject,'RFQ')&$top=100&$select=id,subject,from,bodyPreview,conversationId,receivedDateTime&$orderby=receivedDateTime desc`
                 );
                 
                 if (inboxReplies.value) {
                     for (const email of inboxReplies.value) {
+                        const receivedDate = new Date(email.receivedDateTime);
                         const bodyPreview = email.bodyPreview || '';
-                        if (isSupplierReply(email, bodyPreview) && !allReplyIds.has(email.id)) {
+                        
+                        // Only count if: NOT in tracked conversation (already counted in Step 1) AND new after baseline
+                        const inTrackedConversation = trackedConversationIds.has(email.conversationId);
+                        const isNewAfterBaseline = !baselineTime || receivedDate > baselineTime;
+                        
+                        if (isSupplierReply(email, bodyPreview) && 
+                            !allReplyIds.has(email.id) &&
+                            !inTrackedConversation &&  // Skip if already counted in Step 1
+                            isNewAfterBaseline) {
                             allReplyIds.add(email.id);
                             repliesReceived++;
-                            // Not sorted yet, so don't increment repliesSorted
+                            // Not sorted yet (still in inbox)
                         }
                     }
                 }
@@ -2309,6 +2368,8 @@ async function handleSendAllDraftsFromDraftMode() {
         
         // Track material codes for all drafts being sent
         const sentMaterialCodes = new Set();
+        // Track sent email details for reply tracking
+        const sentEmails = [];
         
         // Persist initial state
         persistState({
@@ -2316,7 +2377,10 @@ async function handleSendAllDraftsFromDraftMode() {
             totalDrafts: totalDrafts,
             sentCount: 0,
             autoRepliesScheduled: 0,
-            materialCodes: []
+            materialCodes: [],
+            sentEmails: [],
+            baselineTimestamp: null,
+            baselineFolderCounts: {}
         });
         
         let sentCount = 0;
@@ -2362,6 +2426,20 @@ async function handleSendAllDraftsFromDraftMode() {
                     autoRepliesScheduled++;
                 }
                 
+                // Track sent email details if available
+                if (sendResult.sentEmail) {
+                    const materialCode = materialMatch ? materialMatch[0].toUpperCase() : null;
+                    sentEmails.push({
+                        id: sendResult.sentEmail.id,
+                        conversationId: sendResult.sentEmail.conversationId,
+                        internetMessageId: sendResult.sentEmail.internetMessageId,
+                        materialCode: materialCode,
+                        sentDateTime: sendResult.sentEmail.sentDateTime || new Date().toISOString(),
+                        subject: sendResult.sentEmail.subject || draft.subject
+                    });
+                    console.log(`  Tracked sent email: ${sendResult.sentEmail.id}, conversationId: ${sendResult.sentEmail.conversationId}`);
+                }
+                
                 // Update progress bars
                 updateProgress();
                 
@@ -2369,7 +2447,8 @@ async function handleSendAllDraftsFromDraftMode() {
                 persistState({ 
                     sentCount, 
                     autoRepliesScheduled,
-                    materialCodes: Array.from(sentMaterialCodes)
+                    materialCodes: Array.from(sentMaterialCodes),
+                    sentEmails: sentEmails.slice() // Store copy of array
                 });
                 
                 console.log(`✓ Sent ${sentCount}/${totalDrafts}: ${draft.subject}`);
@@ -2382,19 +2461,20 @@ async function handleSendAllDraftsFromDraftMode() {
         // STEP 2: If we sent all non-current drafts and there's no current draft, we're done
         if (!currentDraft) {
             const materialCodesArray = Array.from(sentMaterialCodes);
-            console.log(`Tracking replies for material codes: ${materialCodesArray.join(', ')}`);
+            console.log(`Tracking replies for ${sentEmails.length} sent emails with material codes: ${materialCodesArray.join(', ')}`);
             
             persistState({ 
                 sendingInProgress: false, 
                 lastSendResult: 'success',
                 sentCount,
                 autoRepliesScheduled,
-                materialCodes: materialCodesArray
+                materialCodes: materialCodesArray,
+                sentEmails: sentEmails.slice()
             });
             updateProgress();
             
-            // Start monitoring for replies with material codes
-            startReplyMonitoring(sentCount, updateProgress, materialCodesArray);
+            // Start monitoring for replies with material codes and sent emails
+            startReplyMonitoring(sentCount, updateProgress, materialCodesArray, sentEmails);
             
             Helpers.showSuccess(`Sent ${sentCount} RFQ(s) successfully! ${autoRepliesScheduled} auto-replies scheduled.`);
             return;
@@ -2414,12 +2494,14 @@ async function handleSendAllDraftsFromDraftMode() {
         const materialCodesArray = Array.from(sentMaterialCodes);
         
         // Mark state as complete BEFORE sending current draft (because we won't get a chance after)
+        // Note: We can't track the current draft's sent email details since add-in will close
         persistState({ 
             sendingInProgress: false, 
             lastSendResult: 'success',
             sentCount: sentCount + 1, // Include the one we're about to send
             autoRepliesScheduled: autoRepliesScheduled + 1, // Assume it will work
             materialCodes: materialCodesArray,
+            sentEmails: sentEmails.slice(), // Store what we have so far
             showSuccessOnReopen: true
         });
         
@@ -2433,8 +2515,31 @@ async function handleSendAllDraftsFromDraftMode() {
         
         // Send the current draft - this will trigger add-in close
         try {
-            await sendDraftEmailWithFullWorkflow(currentDraft);
+            const sendResult = await sendDraftEmailWithFullWorkflow(currentDraft);
             console.log('✓ Sent current draft successfully');
+            
+            // Try to update with sent email details if available (may fail if add-in closes)
+            if (sendResult.sentEmail) {
+                const currentMaterialCode = currentMaterialMatch ? currentMaterialMatch[0].toUpperCase() : null;
+                const updatedSentEmails = [...sentEmails, {
+                    id: sendResult.sentEmail.id,
+                    conversationId: sendResult.sentEmail.conversationId,
+                    internetMessageId: sendResult.sentEmail.internetMessageId,
+                    materialCode: currentMaterialCode,
+                    sentDateTime: sendResult.sentEmail.sentDateTime || new Date().toISOString(),
+                    subject: sendResult.sentEmail.subject || currentDraft.subject
+                }];
+                
+                try {
+                    persistState({ 
+                        sentEmails: updatedSentEmails,
+                        materialCodes: materialCodesArray
+                    });
+                } catch (e) {
+                    // Ignore if add-in already closed
+                    console.warn('Could not update sent emails in state (add-in may have closed):', e);
+                }
+            }
         } catch (error) {
             console.error('Error sending current draft:', error);
             // Try to update state even though add-in might close
@@ -2455,23 +2560,137 @@ async function handleSendAllDraftsFromDraftMode() {
 }
 
 /**
+ * Establish baseline folder counts for tracking new replies
+ */
+async function establishBaseline(materialCodes, sentEmails = []) {
+    const baselineTimestamp = Date.now();
+    const baselineFolderCounts = {};
+    
+    try {
+        // Get folders for material codes
+        const allFolders = await AuthService.graphRequest(
+            `/me/mailFolders?$select=id,displayName,parentFolderId&$top=500`
+        );
+        
+        const quoteFolders = [];
+        const clarificationFolders = [];
+        
+        if (allFolders.value) {
+            // Find material code folders
+            const materialFolders = [];
+            for (const folder of allFolders.value) {
+                if (/^MAT-\d+$/i.test(folder.displayName)) {
+                    const folderCode = folder.displayName.toUpperCase();
+                    if (materialCodes.length === 0 || materialCodes.includes(folderCode)) {
+                        materialFolders.push(folder);
+                    }
+                }
+            }
+            
+            // Get subfolders within material folders
+            for (const materialFolder of materialFolders) {
+                try {
+                    const materialSubfolders = await AuthService.graphRequest(
+                        `/me/mailFolders/${materialFolder.id}/childFolders?$select=id,displayName&$top=20`
+                    );
+                    
+                    if (materialSubfolders.value) {
+                        for (const subfolder of materialSubfolders.value) {
+                            const name = (subfolder.displayName || '').toLowerCase();
+                            if (name.includes('quote') && !name.includes('sent')) {
+                                quoteFolders.push(subfolder);
+                            }
+                            if (name.includes('clarification') && !name.includes('awaiting')) {
+                                clarificationFolders.push(subfolder);
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.warn(`Error fetching subfolders for ${materialFolder.displayName}:`, e);
+                }
+            }
+        }
+        
+        // Count emails in each folder
+        for (const folder of [...quoteFolders, ...clarificationFolders]) {
+            try {
+                const response = await AuthService.graphRequest(
+                    `/me/mailFolders/${folder.id}/messages?$select=id&$count=true&$top=1`
+                );
+                baselineFolderCounts[folder.id] = response['@odata.count'] || 0;
+                console.log(`Baseline: Folder ${folder.displayName} (${folder.id}) has ${baselineFolderCounts[folder.id]} emails`);
+            } catch (e) {
+                console.warn(`Error counting emails in folder ${folder.id}:`, e);
+                baselineFolderCounts[folder.id] = 0;
+            }
+        }
+        
+        // Count RFQ emails in inbox
+        try {
+            const inboxResponse = await AuthService.graphRequest(
+                `/me/mailFolders/inbox/messages?$filter=contains(subject,'RFQ')&$count=true&$top=1`
+            );
+            baselineFolderCounts['inbox-rfq'] = inboxResponse['@odata.count'] || 0;
+            console.log(`Baseline: Inbox has ${baselineFolderCounts['inbox-rfq']} RFQ emails`);
+        } catch (e) {
+            console.warn('Error counting inbox RFQ emails:', e);
+            baselineFolderCounts['inbox-rfq'] = 0;
+        }
+        
+        persistState({
+            baselineTimestamp,
+            baselineFolderCounts
+        });
+        
+        console.log(`Baseline established at ${new Date(baselineTimestamp).toISOString()}`);
+        console.log(`Baseline folder counts:`, baselineFolderCounts);
+        
+        return { baselineTimestamp, baselineFolderCounts };
+    } catch (error) {
+        console.error('Error establishing baseline:', error);
+        // Return fallback baseline
+        return {
+            baselineTimestamp: Date.now(),
+            baselineFolderCounts: {}
+        };
+    }
+}
+
+/**
  * Start monitoring for replies and update progress bars
  */
-function startReplyMonitoring(totalSent, updateProgressCallback, materialCodes = []) {
+function startReplyMonitoring(totalSent, updateProgressCallback, materialCodes = [], sentEmails = []) {
     if (!AuthService.isSignedIn()) return;
     
-    // Get material codes from state if not provided (for legacy/fallback)
-    if (materialCodes.length === 0) {
+    // Get material codes and sent emails from state if not provided (for legacy/fallback)
+    if (materialCodes.length === 0 || sentEmails.length === 0) {
         const state = getPersistedState();
-        materialCodes = state.materialCodes || [];
-        if (materialCodes.length === 0 && totalSent > 0) {
-            console.warn('No material codes provided or in state - counting all folders (may include old replies)');
+        materialCodes = materialCodes.length === 0 ? (state.materialCodes || []) : materialCodes;
+        sentEmails = sentEmails.length === 0 ? (state.sentEmails || []) : sentEmails;
+        
+        if ((materialCodes.length === 0 || sentEmails.length === 0) && totalSent > 0) {
+            console.warn('No material codes or sent emails in state - may count old replies');
         }
     }
     
     if (materialCodes.length > 0) {
         console.log(`Reply monitoring: Filtering for material codes: ${materialCodes.join(', ')}`);
     }
+    if (sentEmails.length > 0) {
+        console.log(`Reply monitoring: Tracking ${sentEmails.length} sent emails`);
+    }
+    
+    // Establish baseline when monitoring starts (await it before starting interval)
+    let baselineEstablished = false;
+    
+    // Establish baseline immediately
+    establishBaseline(materialCodes, sentEmails).then(() => {
+        baselineEstablished = true;
+        console.log('Baseline established - monitoring can now count replies accurately');
+    }).catch(err => {
+        console.error('Failed to establish baseline:', err);
+        baselineEstablished = true; // Continue anyway
+    });
     
     const repliesReceivedCount = document.getElementById('replies-received-count');
     const repliesReceivedProgress = document.getElementById('replies-received-progress');
@@ -2553,11 +2772,60 @@ function startReplyMonitoring(totalSent, updateProgressCallback, materialCodes =
     
     let checkInterval = setInterval(async () => {
         try {
+            // Get baseline and state
+            const state = getPersistedState();
+            const baselineTimestamp = state.baselineTimestamp || null;
+            const baselineFolderCounts = state.baselineFolderCounts || {};
+            const trackedSentEmails = state.sentEmails || sentEmails;
+            
+            // Get tracked conversation IDs
+            const trackedConversationIds = new Set(
+                trackedSentEmails.map(e => e.conversationId).filter(Boolean)
+            );
+            
             let repliesReceived = 0;
             let repliesSorted = 0;
             const allReplyIds = new Set(); // Track unique reply IDs
+            const baselineTime = baselineTimestamp ? new Date(baselineTimestamp) : null;
             
-            // Step 1: Get all mail folders and find material code folders first
+            // Step 1: Find replies by conversation ID (PRIMARY METHOD)
+            if (trackedConversationIds.size > 0) {
+                for (const conversationId of trackedConversationIds) {
+                    try {
+                        const escapedConvId = conversationId.replace(/'/g, "''").replace(/\\/g, '\\\\');
+                        const conversationEmails = await AuthService.graphRequest(
+                            `/me/messages?$filter=conversationId eq '${escapedConvId}'&$select=id,subject,from,bodyPreview,conversationId,receivedDateTime,parentFolderId&$top=50`
+                        );
+                        
+                        if (conversationEmails.value) {
+                            for (const email of conversationEmails.value) {
+                                // Skip the sent emails themselves - only count replies
+                                const isTrackedSent = trackedSentEmails.some(e => e.id === email.id);
+                                if (isTrackedSent) continue;
+                                
+                                // Check if it's a new reply (after baseline timestamp)
+                                const receivedDate = new Date(email.receivedDateTime);
+                                const bodyPreview = email.bodyPreview || '';
+                                const isNewAfterBaseline = !baselineTime || receivedDate > baselineTime;
+                                
+                                // Only count if it's a valid reply AND new (after baseline)
+                                if (isSupplierReply(email, bodyPreview) && 
+                                    isNewAfterBaseline &&
+                                    !allReplyIds.has(email.id)) {
+                                    allReplyIds.add(email.id);
+                                    repliesReceived++;
+                                    // Note: We'll check if it's sorted in Step 2 below
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.warn(`Error finding replies for conversation ${conversationId}:`, e);
+                    }
+                }
+            }
+            
+            // Step 2: Count new emails in folders (after baseline) - FALLBACK/SUPPLEMENT
+            // Get folders for material codes
             let quoteFolders = [];
             let clarificationFolders = [];
             
@@ -2567,20 +2835,16 @@ function startReplyMonitoring(totalSent, updateProgressCallback, materialCodes =
                 );
                 
                 if (allFolders.value) {
-                    // First find material code folders (MAT-XXXXX pattern)
-                    // Only include folders for material codes that were sent in the current batch
                     const materialFolders = [];
                     for (const folder of allFolders.value) {
                         if (/^MAT-\d+$/i.test(folder.displayName)) {
                             const folderCode = folder.displayName.toUpperCase();
-                            // Only include if materialCodes is empty (legacy/fallback) or if this material code was tracked
                             if (materialCodes.length === 0 || materialCodes.includes(folderCode)) {
                                 materialFolders.push(folder);
                             }
                         }
                     }
                     
-                    // Then find Quotes/Clarification folders within each material folder
                     for (const materialFolder of materialFolders) {
                         try {
                             const materialSubfolders = await AuthService.graphRequest(
@@ -2591,27 +2855,15 @@ function startReplyMonitoring(totalSent, updateProgressCallback, materialCodes =
                                 for (const subfolder of materialSubfolders.value) {
                                     const name = (subfolder.displayName || '').toLowerCase();
                                     if (name.includes('quote') && !name.includes('sent')) {
-                                        quoteFolders.push(subfolder.id);
+                                        quoteFolders.push({ id: subfolder.id, displayName: subfolder.displayName });
                                     }
                                     if (name.includes('clarification') && !name.includes('awaiting')) {
-                                        clarificationFolders.push(subfolder.id);
+                                        clarificationFolders.push({ id: subfolder.id, displayName: subfolder.displayName });
                                     }
                                 }
                             }
                         } catch (e) {
-                            // Ignore errors fetching subfolders for a specific material folder
-                            console.warn(`Error fetching subfolders for ${materialFolder.displayName}:`, e);
-                        }
-                    }
-                    
-                    // Also check for top-level folders as fallback (in case structure is different)
-                    for (const folder of allFolders.value) {
-                        const folderName = (folder.displayName || '').toLowerCase();
-                        if (folderName.includes('quote') && !folderName.includes('sent') && !quoteFolders.includes(folder.id)) {
-                            quoteFolders.push(folder.id);
-                        }
-                        if (folderName.includes('clarification') && !folderName.includes('awaiting') && !clarificationFolders.includes(folder.id)) {
-                            clarificationFolders.push(folder.id);
+                            console.warn(`Error fetching subfolders:`, e);
                         }
                     }
                 }
@@ -2619,66 +2871,93 @@ function startReplyMonitoring(totalSent, updateProgressCallback, materialCodes =
                 console.warn('Error getting folders:', e);
             }
             
-            // Step 2: Count emails in sorted folders (Quotes and Clarifications)
-            for (const folderId of quoteFolders) {
-                try {
-                    const folderEmails = await AuthService.graphRequest(
-                        `/me/mailFolders/${folderId}/messages?$select=id,subject,from,bodyPreview&$top=100`
-                    );
-                    if (folderEmails.value) {
-                        for (const email of folderEmails.value) {
-                            const bodyPreview = email.bodyPreview || '';
-                            if (isSupplierReply(email, bodyPreview) && !allReplyIds.has(email.id)) {
-                                allReplyIds.add(email.id);
-                                repliesReceived++;
-                                repliesSorted++;
-                            }
-                        }
-                    }
-                } catch (e) {
-                    console.warn(`Error counting emails in quote folder ${folderId}:`, e);
-                }
-            }
+            // Note: We'll count new emails in folders as a supplement to conversation-based counting
+            // But avoid double counting - prioritize conversation-based results
             
-            for (const folderId of clarificationFolders) {
-                try {
-                    const folderEmails = await AuthService.graphRequest(
-                        `/me/mailFolders/${folderId}/messages?$select=id,subject,from,bodyPreview&$top=100`
-                    );
-                    if (folderEmails.value) {
-                        for (const email of folderEmails.value) {
-                            const bodyPreview = email.bodyPreview || '';
-                            if (isSupplierReply(email, bodyPreview) && !allReplyIds.has(email.id)) {
-                                allReplyIds.add(email.id);
-                                repliesReceived++;
-                                repliesSorted++;
-                            }
-                        }
-                    }
-                } catch (e) {
-                    console.warn(`Error counting emails in clarification folder ${folderId}:`, e);
-                }
-            }
-            
-            // Step 3: Count RFQ-related emails in inbox (not yet sorted)
+            // Step 3: Count RFQ-related emails in inbox (not yet sorted, after baseline)
+            // IMPORTANT: Only count emails NOT in tracked conversations (Step 1 already counted those)
+            // This is a fallback for emails that might have arrived but aren't in conversation threads yet
             try {
                 const inboxReplies = await AuthService.graphRequest(
-                    `/me/mailFolders/inbox/messages?$filter=contains(subject,'RFQ')&$top=100&$select=id,subject,from,bodyPreview&$orderby=receivedDateTime desc`
+                    `/me/mailFolders/inbox/messages?$filter=contains(subject,'RFQ')&$top=100&$select=id,subject,from,bodyPreview,conversationId,receivedDateTime&$orderby=receivedDateTime desc`
                 );
                 
                 if (inboxReplies.value) {
                     for (const email of inboxReplies.value) {
-                        const bodyPreview = email.bodyPreview || '';
-                        if (isSupplierReply(email, bodyPreview) && !allReplyIds.has(email.id)) {
-                            allReplyIds.add(email.id);
-                            repliesReceived++;
-                            // Not sorted yet, so don't increment repliesSorted
+                        const receivedDate = new Date(email.receivedDateTime);
+                        
+                        // Only count if: NOT in tracked conversation (already counted in Step 1) AND new after baseline
+                        const inTrackedConversation = trackedConversationIds.has(email.conversationId);
+                        const isNewAfterBaseline = !baselineTime || receivedDate > baselineTime;
+                        
+                        // Skip if already in tracked conversation (Step 1 handled it) or already counted
+                        if (!inTrackedConversation && 
+                            isNewAfterBaseline && 
+                            !allReplyIds.has(email.id)) {
+                            const bodyPreview = email.bodyPreview || '';
+                            if (isSupplierReply(email, bodyPreview)) {
+                                allReplyIds.add(email.id);
+                                repliesReceived++;
+                                // Not sorted yet (still in inbox)
+                            }
                         }
                     }
                 }
             } catch (e) {
                 console.warn('Error getting inbox replies:', e);
             }
+            
+            // Calculate replies sorted: check ALL tracked replies to see which ones are in sorted folders
+            // A reply is "sorted" if it's one of our tracked replies AND it's in a Quotes or Clarification folder
+            repliesSorted = 0;
+            const sortedReplyIds = new Set();
+            
+            // First, get all email IDs that are in sorted folders (for quick lookup)
+            const emailsInSortedFolders = new Set();
+            for (const folder of [...quoteFolders, ...clarificationFolders]) {
+                try {
+                    const folderEmails = await AuthService.graphRequest(
+                        `/me/mailFolders/${folder.id}/messages?$select=id,conversationId,receivedDateTime,subject,from,bodyPreview&$top=100`
+                    );
+                    
+                    if (folderEmails.value) {
+                        for (const email of folderEmails.value) {
+                            const receivedDate = new Date(email.receivedDateTime);
+                            const bodyPreview = email.bodyPreview || '';
+                            
+                            // Check if this email is one of our tracked replies
+                            const inTrackedConversation = trackedConversationIds.has(email.conversationId);
+                            const isTrackedReply = inTrackedConversation || allReplyIds.has(email.id);
+                            const isNewAfterBaseline = !baselineTime || receivedDate > baselineTime;
+                            
+                            // If it's a tracked reply and new after baseline, it's sorted (in folder)
+                            if (isSupplierReply(email, bodyPreview) && 
+                                isTrackedReply &&
+                                isNewAfterBaseline) {
+                                emailsInSortedFolders.add(email.id);
+                                
+                                // Also add any new replies found here that we haven't counted yet
+                                // (only if not in tracked conversation - Step 1 already handled those)
+                                if (!inTrackedConversation && !allReplyIds.has(email.id)) {
+                                    allReplyIds.add(email.id);
+                                    repliesReceived++;
+                                }
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.warn(`Error checking sorted folder ${folder.id}:`, e);
+                }
+            }
+            
+            // Count how many of our tracked replies are in sorted folders
+            for (const replyId of allReplyIds) {
+                if (emailsInSortedFolders.has(replyId)) {
+                    sortedReplyIds.add(replyId);
+                }
+            }
+            
+            repliesSorted = sortedReplyIds.size;
             
             console.log(`Reply monitoring: ${repliesReceived} received, ${repliesSorted} sorted out of ${totalSent} sent`);
             
@@ -2804,14 +3083,34 @@ async function sendDraftEmailWithFullWorkflow(draft) {
     
     if (!sentEmail) {
         console.error(`✗ Could not find sent email after ${maxRetries} attempts`);
-        return { success: true, sentEmailId: null, internetMessageId: null, autoReplyScheduled: false };
+        return { 
+            success: true, 
+            sentEmailId: null, 
+            internetMessageId: null, 
+            autoReplyScheduled: false,
+            sentEmail: null
+        };
     }
     
-    internetMessageId = sentEmail.internetMessageId;
-    console.log(`Sent email ID: ${sentEmail.id}, internetMessageId: ${internetMessageId}`);
+    // Get full email details including conversationId and sentDateTime
+    let fullSentEmail = null;
+    try {
+        fullSentEmail = await AuthService.graphRequest(
+            `/me/messages/${sentEmail.id}?$select=id,conversationId,internetMessageId,sentDateTime,subject`
+        );
+    } catch (e) {
+        console.warn('Could not fetch full email details, using partial:', e);
+        fullSentEmail = sentEmail;
+    }
+    
+    internetMessageId = fullSentEmail.internetMessageId || sentEmail.internetMessageId;
+    const conversationId = fullSentEmail.conversationId || null;
+    const sentDateTime = fullSentEmail.sentDateTime || new Date().toISOString();
+    
+    console.log(`Sent email ID: ${fullSentEmail.id}, conversationId: ${conversationId}, internetMessageId: ${internetMessageId}, sentDateTime: ${sentDateTime}`);
     
     // Step 3: Move to correct folder if we have material code
-    if (materialCode) {
+    if (materialCode && fullSentEmail) {
         try {
             // Ensure folder structure exists
             console.log(`Initializing folder structure for ${materialCode}...`);
@@ -2821,8 +3120,8 @@ async function sendDraftEmailWithFullWorkflow(draft) {
             // Move to Sent RFQs folder
             const folderPath = `${materialCode}/${Config.FOLDERS.SENT_RFQS}`;
             console.log(`Moving email to ${folderPath}...`);
-            const moveResult = await FolderManagement.moveEmailToFolder(sentEmail.id, folderPath);
-            movedEmailId = moveResult?.id || sentEmail.id;
+            const moveResult = await FolderManagement.moveEmailToFolder(fullSentEmail.id, folderPath);
+            movedEmailId = moveResult?.id || fullSentEmail.id;
             console.log(`✓ Moved email to ${folderPath}`);
             
             // Wait for move to complete
@@ -2875,9 +3174,17 @@ async function sendDraftEmailWithFullWorkflow(draft) {
     
     return {
         success: true,
-        sentEmailId: movedEmailId || sentEmail.id,
+        sentEmailId: movedEmailId || fullSentEmail.id,
         internetMessageId,
-        autoReplyScheduled
+        autoReplyScheduled,
+        sentEmail: {
+            id: movedEmailId || fullSentEmail.id,
+            conversationId: conversationId,
+            internetMessageId: internetMessageId,
+            materialCode: materialCode,
+            sentDateTime: sentDateTime,
+            subject: subject
+        }
     };
 }
 
