@@ -6472,6 +6472,35 @@ function renderSummaryCards(quotes, container) {
     const quotesWithDelivery = quotes.filter(q => q.delivery_time || q.lead_time);
     const fastestQuote = quotesWithDelivery.length > 0 ? quotesWithDelivery[0] : null;
 
+    // Parse delivery time to extract main value and secondary text
+    let deliveryValue = 'N/A';
+    let deliverySubtext = '';
+    if (fastestQuote) {
+        const deliveryText = (fastestQuote.delivery_time || fastestQuote.lead_time || '').trim();
+        
+        if (deliveryText) {
+            // Try to split on common phrases: "after", "from", "upon", "within"
+            const splitPattern = /\s+(after|from|upon|within)\s+/i;
+            const match = deliveryText.match(splitPattern);
+            
+            if (match && match.index > 0) {
+                // Split found - extract main value and secondary text
+                deliveryValue = deliveryText.substring(0, match.index).trim();
+                deliverySubtext = deliveryText.substring(match.index + match[0].length).trim();
+                // Capitalize first letter of secondary text
+                if (deliverySubtext) {
+                    deliverySubtext = deliverySubtext.charAt(0).toUpperCase() + deliverySubtext.slice(1);
+                }
+            } else {
+                // No split found - use full text as value, supplier as subtext
+                deliveryValue = deliveryText;
+                deliverySubtext = fastestQuote.supplier_name || '';
+            }
+        } else {
+            deliverySubtext = fastestQuote.supplier_name || '';
+        }
+    }
+
     // Calculate recommended quote
     const recommendation = calculateRecommendedQuote(quotes);
     quoteComparisonState.recommendedQuote = recommendation?.quote || null;
@@ -6493,8 +6522,8 @@ function renderSummaryCards(quotes, container) {
         <div class="summary-card">
             <div class="summary-card-content">
                 <div class="summary-card-label">Fastest Delivery</div>
-                <div class="summary-card-value">${fastestQuote ? Helpers.escapeHtml(fastestQuote.delivery_time || fastestQuote.lead_time || 'N/A') : 'N/A'}</div>
-                ${fastestQuote && fastestQuote.supplier_name ? `<div class="summary-card-subtext">${Helpers.escapeHtml(fastestQuote.supplier_name)}</div>` : ''}
+                <div class="summary-card-value">${Helpers.escapeHtml(deliveryValue)}</div>
+                ${deliverySubtext ? `<div class="summary-card-subtext">${Helpers.escapeHtml(deliverySubtext)}</div>` : ''}
             </div>
         </div>
         <div class="summary-card summary-card-recommended">
