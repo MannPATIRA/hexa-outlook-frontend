@@ -35,23 +35,30 @@ button, input, textarea, select {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 8px 16px;
+    height: 56px;
+    padding: 0 16px;
     background-color: #0d3d61;
     color: white;
     flex-shrink: 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.10);
 }
 
 .header-left {
     display: flex;
     align-items: center;
     gap: 10px;
+    min-width: 0;
+    flex: 1;
 }
 
 .header-brand {
     font-size: 18px;
     font-weight: 600;
-    color: white;
+    color: rgba(255, 255, 255, 0.92);
     letter-spacing: 0.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .header-logo {
@@ -70,13 +77,14 @@ button, input, textarea, select {
     display: flex;
     gap: 8px;
     align-items: center;
+    flex-shrink: 0;
 }
 
 /* Auth Status Styles */
 .auth-status {
     display: flex;
     align-items: center;
-    margin-right: 8px;
+    gap: 8px;
 }
 
 .sign-in-btn {
@@ -102,19 +110,73 @@ button, input, textarea, select {
 .user-info {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
 }
 
 .user-name {
-    font-size: 12px;
-    color: rgba(255, 255, 255, 0.9);
+    font-size: 13px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.80);
     max-width: 120px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
-.header-actions button {
+.account-divider {
+    width: 1px;
+    height: 20px;
+    background: rgba(255, 255, 255, 0.18);
+    margin: 0 8px;
+    flex-shrink: 0;
+}
+
+/* Icon Button Styles */
+.header-actions button.ms-Button--icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    min-height: 36px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+    color: white;
+}
+
+.header-actions button.ms-Button--icon:hover {
+    background-color: rgba(255, 255, 255, 0.10);
+}
+
+.header-actions button.ms-Button--icon:active {
+    background-color: rgba(255, 255, 255, 0.14);
+}
+
+.header-actions button.ms-Button--icon:focus {
+    outline: 2px solid rgba(255, 255, 255, 0.35);
+    outline-offset: 2px;
+}
+
+.header-actions button.ms-Button--icon .ms-Button-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.header-actions button.ms-Button--icon .ms-Button-icon .ms-Icon {
+    font-size: 18px;
+    width: 18px;
+    height: 18px;
+    line-height: 18px;
+}
+
+/* Legacy button styles for backward compatibility */
+.header-actions button:not(.ms-Button--icon) {
     background: transparent;
     border: none;
     color: white;
@@ -123,7 +185,7 @@ button, input, textarea, select {
     border-radius: 4px;
 }
 
-.header-actions button:hover {
+.header-actions button:not(.ms-Button--icon):hover {
     background-color: rgba(255, 255, 255, 0.2);
 }
 
