@@ -1342,6 +1342,33 @@ main {
     background-color: #0d3d61;
 }
 
+/* Secondary button - outline style */
+.ms-Button--secondary {
+    background-color: transparent;
+    border: 1px solid #0d3d61;
+    color: #0d3d61;
+}
+
+.ms-Button--secondary:hover {
+    background-color: rgba(13, 61, 97, 0.08);
+    border-color: #0d3d61;
+}
+
+/* Tertiary button - text/link style */
+.ms-Button--tertiary {
+    background-color: transparent;
+    border: none;
+    color: #0d3d61;
+    padding: 4px 8px;
+    font-size: 13px;
+    text-decoration: none;
+}
+
+.ms-Button--tertiary:hover {
+    background-color: rgba(13, 61, 97, 0.08);
+    text-decoration: underline;
+}
+
 .ms-Button--small {
     padding: 4px 10px;
     font-size: 12px;
