@@ -284,6 +284,43 @@
             </div>
         </div>
 
+        <!-- PO Generation Mode - Shown when user accepts a quote -->
+        <div id="po-generation-mode" class="mode-container hidden">
+            <div class="mode-header">
+                <h2>Purchase Order Generation</h2>
+            </div>
+            <div class="mode-body po-generation-body">
+                <!-- Loading State -->
+                <div id="po-loading-state" class="po-state">
+                    <div class="po-loading-content">
+                        <div class="spinner-large"></div>
+                        <p class="po-loading-text">Generating PO and adding to SAP</p>
+                    </div>
+                </div>
+                
+                <!-- Success State -->
+                <div id="po-success-state" class="po-state hidden">
+                    <div class="po-success-content">
+                        <div class="po-success-icon">
+                            <i class="ms-Icon ms-Icon--Completed"></i>
+                        </div>
+                        <div class="po-number-display">
+                            <div class="po-number-label">Purchase Order Number</div>
+                            <div id="po-number-value" class="po-number-value">-</div>
+                        </div>
+                        <div id="po-success-message" class="po-success-message">
+                            PO has been added and sent to the supplier.
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="mode-footer">
+                <button id="back-to-workflow-from-po" class="ms-Button ms-Button--tertiary">
+                    <span class="ms-Button-label">← Back to Workflow</span>
+                </button>
+            </div>
+        </div>
+
         <!-- Main Content Area -->
         <main id="main-content">
 

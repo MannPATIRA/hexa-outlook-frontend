@@ -742,7 +742,7 @@ async function detectEmailContext() {
  */
 function hideAllModes() {
     // Hide all mode containers
-    const modeContainers = ['draft-mode', 'clarification-mode', 'quote-mode'];
+    const modeContainers = ['draft-mode', 'clarification-mode', 'quote-mode', 'po-generation-mode'];
     modeContainers.forEach(id => {
         const el = document.getElementById(id);
         if (el) el.classList.add('hidden');
@@ -3458,26 +3458,109 @@ async function handleReplyToSupplier() {
 }
 
 /**
- * Handle accepting a quote
+ * Generate a PO number in format PO-YYYYMMDD-XXX
  */
-async function handleAcceptQuote() {
-    if (!AppState.emailContext?.email) {
-        Helpers.showError('No email context');
+function generatePONumber() {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const random = String(Math.floor(Math.random() * 1000)).padStart(3, '0');
+    return `PO-${year}${month}${day}-${random}`;
+}
+
+/**
+ * Show PO generation mode and start the generation process
+ */
+async function showPOGenerationMode(quote) {
+    console.log('Showing PO Generation mode');
+    hideAllModes();
+    
+    const poMode = document.getElementById('po-generation-mode');
+    if (!poMode) {
+        console.error('PO generation mode element not found');
         return;
     }
     
-    try {
-        Helpers.showLoading('Processing quote acceptance...');
-        
-        // For now, just show a success message
-        // In a real implementation, this would create a PO or update the system
-        Helpers.showSuccess('Quote acceptance noted. Please create a Purchase Order in your ERP system.');
-        
-    } catch (error) {
-        Helpers.showError('Failed to process: ' + error.message);
-    } finally {
-        Helpers.hideLoading();
+    poMode.classList.remove('hidden');
+    AppState.currentMode = 'po-generation';
+    
+    // Update header title
+    const headerTitle = document.getElementById('header-title');
+    if (headerTitle) {
+        headerTitle.textContent = 'Purchase Order Generation';
+        headerTitle.setAttribute('title', 'Purchase Order Generation');
     }
+    
+    // Show loading state, hide success state
+    const loadingState = document.getElementById('po-loading-state');
+    const successState = document.getElementById('po-success-state');
+    
+    if (loadingState) loadingState.classList.remove('hidden');
+    if (successState) successState.classList.add('hidden');
+    
+    // Start the PO generation process
+    await simulatePOCreation(quote);
+}
+
+/**
+ * Simulate PO creation with 2-second delay
+ */
+async function simulatePOCreation(quote) {
+    try {
+        // Wait 2 seconds to show loading animation
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        // Generate PO number
+        const poNumber = generatePONumber();
+        
+        // Get supplier name from quote
+        const supplierName = quote?.supplier_name || quote?.supplier || 'the supplier';
+        
+        // Hide loading, show success
+        const loadingState = document.getElementById('po-loading-state');
+        const successState = document.getElementById('po-success-state');
+        const poNumberElement = document.getElementById('po-number-value');
+        const successMessageElement = document.getElementById('po-success-message');
+        
+        if (loadingState) loadingState.classList.add('hidden');
+        if (successState) successState.classList.remove('hidden');
+        if (poNumberElement) poNumberElement.textContent = poNumber;
+        if (successMessageElement) {
+            successMessageElement.innerHTML = `PO <strong>${Helpers.escapeHtml(poNumber)}</strong> has been added and sent to <strong>${Helpers.escapeHtml(supplierName)}</strong>.`;
+        }
+        
+        console.log(`PO generated: ${poNumber} for supplier: ${supplierName}`);
+    } catch (error) {
+        console.error('Error during PO generation:', error);
+        Helpers.showError('Failed to generate PO: ' + error.message);
+        // Show error but keep PO mode visible
+    }
+}
+
+/**
+ * Handle accepting a quote
+ */
+async function handleAcceptQuote(quote = null) {
+    // If quote is passed directly, use it
+    // Otherwise, try to get from email context
+    if (!quote && !AppState.emailContext?.email) {
+        Helpers.showError('No quote or email context available');
+        return;
+    }
+    
+    // If no quote passed, try to construct from email context
+    if (!quote && AppState.emailContext?.email) {
+        // Try to get quote from parsed quote data
+        quote = AppState.parsedQuote || {
+            supplier_name: AppState.emailContext.email.from?.emailAddress?.name || 
+                          AppState.emailContext.email.from?.emailAddress?.address || 
+                          'Unknown Supplier'
+        };
+    }
+    
+    // Show PO generation mode
+    await showPOGenerationMode(quote);
 }
 
 // ==================== INITIALIZATION ====================
@@ -3604,6 +3687,10 @@ function setupModeEventListeners() {
         loadInitialData();
     });
     document.getElementById('back-to-workflow-from-quote')?.addEventListener('click', () => {
+        showRFQWorkflowMode();
+        loadInitialData();
+    });
+    document.getElementById('back-to-workflow-from-po')?.addEventListener('click', () => {
         showRFQWorkflowMode();
         loadInitialData();
     });
@@ -6896,17 +6983,12 @@ function exportQuotesToPDF(quotes) {
 /**
  * Handle accept quote from modal
  */
-function handleAcceptQuoteFromModal(quote) {
+async function handleAcceptQuoteFromModal(quote) {
     // Close modal first
     closeQuoteComparisonModal();
     
-    // Then handle acceptance (reuse existing logic)
-    if (typeof handleAcceptQuote === 'function') {
-        // Find the quote in AppState or pass it directly
-        handleAcceptQuote(quote);
-    } else {
-        Helpers.showSuccess(`Quote from ${quote.supplier_name} accepted`);
-    }
+    // Show PO generation mode with the quote
+    await showPOGenerationMode(quote);
 }
 
 /**
