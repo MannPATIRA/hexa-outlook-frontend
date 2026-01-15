@@ -2428,6 +2428,68 @@ textarea.ms-TextField-field {
     margin-top: 2px;
 }
 
+/* Recommended card styling */
+.summary-card-recommended {
+    border-color: #0d3d61;
+    background-color: rgba(227, 242, 253, 0.3);
+}
+
+.summary-card-reason {
+    font-size: 11px;
+    color: #0d3d61;
+    font-style: italic;
+    line-height: 1.3;
+    margin-top: 4px;
+}
+
+/* No quotes message */
+.no-quotes-message {
+    text-align: center;
+    color: #605e5c;
+    padding: 20px;
+    font-size: 14px;
+}
+
+/* ==================== COMPARISON ACTIONS ==================== */
+
+.comparison-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 0;
+}
+
+.comparison-actions .ms-Button {
+    width: 100%;
+    justify-content: center;
+}
+
+.comparison-actions .ms-Button--primary {
+    background-color: #0d3d61;
+    border-color: #0d3d61;
+}
+
+.comparison-actions .ms-Button--primary:hover {
+    background-color: #0a2f4d;
+    border-color: #0a2f4d;
+}
+
+/* View all quotes link */
+.view-all-link {
+    text-align: center;
+    padding: 8px 0 16px 0;
+}
+
+.view-all-link a {
+    color: #0d3d61;
+    font-size: 13px;
+    text-decoration: none;
+}
+
+.view-all-link a:hover {
+    text-decoration: underline;
+}
+
 .comparison-table-container {
     background: white;
     border-radius: 2px;
@@ -2505,9 +2567,10 @@ textarea.ms-TextField-field {
     min-width: 120px;
 }
 
-.price-cell.best-price {
+/* Green highlight removed - using card selection instead */
+/* .price-cell.best-price {
     background-color: #dff6dd;
-}
+} */
 
 .price-value {
     color: #323130;
@@ -2585,6 +2648,100 @@ textarea.ms-TextField-field {
 
 .empty-state p {
     font-size: 16px;
+}
+
+/* ==================== QUOTE CARDS ==================== */
+
+.quote-cards-container {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 8px 0;
+}
+
+.quote-card {
+    border: 1px solid rgba(0,0,0,0.08);
+    border-radius: 2px;
+    padding: 12px;
+    background: white;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.quote-card:hover {
+    background-color: #faf9f8;
+    border-color: rgba(0,0,0,0.12);
+}
+
+.quote-card.selected {
+    border: 1px solid #0d3d61;
+    background-color: rgba(227, 242, 253, 0.3);
+}
+
+.quote-card.selected:hover {
+    background-color: rgba(227, 242, 253, 0.4);
+}
+
+.quote-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+
+.quote-card-main {
+    flex: 1;
+    min-width: 0;
+}
+
+.quote-card-supplier {
+    font-size: 14px;
+    font-weight: 600;
+    color: #323130;
+    line-height: 20px;
+    margin-bottom: 2px;
+}
+
+.quote-card-contact {
+    font-size: 12px;
+    color: #605e5c;
+    line-height: 16px;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+}
+
+.quote-card-price {
+    font-size: 16px;
+    font-weight: 600;
+    color: #323130;
+    line-height: 22px;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.quote-card-leadtime {
+    font-size: 12px;
+    color: #605e5c;
+    line-height: 16px;
+    margin-bottom: 4px;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+}
+
+.quote-card-meta {
+    font-size: 12px;
+    color: #605e5c;
+    line-height: 16px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .error-message {

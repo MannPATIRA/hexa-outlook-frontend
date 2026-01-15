@@ -603,7 +603,8 @@
                     </button>
                 </div>
                 
-                <div class="modal-toolbar">
+                <!-- Toolbar hidden by default - shown when viewing all quotes -->
+                <div id="quote-comparison-toolbar" class="modal-toolbar hidden">
                     <div class="search-input-group">
                         <input type="text" id="quote-search-input" class="ms-TextField-field" placeholder="Search suppliers..." />
                         <button id="toolbar-filters-toggle" class="filters-toggle-btn" title="Filters">
@@ -653,12 +654,30 @@
                 </div>
 
                 <div class="modal-content quote-comparison-content">
+                    <!-- Summary cards with KPIs -->
                     <div id="quote-summary-cards" class="summary-cards-grid">
                         <!-- Summary cards will be inserted here -->
                     </div>
                     
-                    <div id="quote-comparison-table-container" class="comparison-table-container">
-                        <div id="quote-comparison-loading" class="loading-indicator">
+                    <!-- Action buttons below summary -->
+                    <div id="quote-comparison-actions" class="comparison-actions">
+                        <button id="accept-recommended-btn" class="ms-Button ms-Button--primary">
+                            <span class="ms-Button-label">Accept Recommended</span>
+                        </button>
+                        <button id="export-pdf-summary-btn" class="ms-Button ms-Button--default">
+                            <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--PDF"></i></span>
+                            <span class="ms-Button-label">Export PDF</span>
+                        </button>
+                    </div>
+                    
+                    <!-- View all quotes link -->
+                    <div class="view-all-link">
+                        <a href="#" id="view-all-quotes-link">View all quotes</a>
+                    </div>
+                    
+                    <!-- Quote list hidden by default - shown when "View all quotes" clicked -->
+                    <div id="quote-comparison-table-container" class="comparison-table-container hidden">
+                        <div id="quote-comparison-loading" class="loading-indicator hidden">
                             <div class="spinner-small"></div>
                             <span>Loading quotes...</span>
                         </div>
@@ -676,9 +695,6 @@
                         <span id="quote-count-display" class="quote-count-text">0 quotes</span>
                     </div>
                     <div class="modal-footer-right">
-                        <button id="accept-quote-from-modal" class="ms-Button ms-Button--primary">
-                            <span class="ms-Button-label">Accept Selected Quote</span>
-                        </button>
                         <button id="close-quote-comparison-modal-footer" class="ms-Button ms-Button--default">
                             <span class="ms-Button-label">Close</span>
                         </button>

@@ -3729,14 +3729,37 @@ function setupModeEventListeners() {
         exportQuotesToPDF(modalQuotesState.filteredQuotes);
     });
     
-    // Accept quote from modal
+    // Accept quote from modal (legacy - for all quotes view)
     document.getElementById('accept-quote-from-modal')?.addEventListener('click', () => {
-        // Get the first quote (or selected quote if we add selection later)
-        if (modalQuotesState.filteredQuotes.length > 0) {
+        // Get the selected quote
+        if (modalQuotesState.selectedIndex !== null && modalQuotesState.filteredQuotes.length > modalQuotesState.selectedIndex) {
+            handleAcceptQuoteFromModal(modalQuotesState.filteredQuotes[modalQuotesState.selectedIndex]);
+        } else if (modalQuotesState.filteredQuotes.length > 0) {
+            // Fallback to first quote if none selected
             handleAcceptQuoteFromModal(modalQuotesState.filteredQuotes[0]);
         } else {
             Helpers.showError('No quote selected');
         }
+    });
+    
+    // Accept recommended quote button (summary view)
+    document.getElementById('accept-recommended-btn')?.addEventListener('click', () => {
+        if (quoteComparisonState.recommendedQuote) {
+            handleAcceptQuoteFromModal(quoteComparisonState.recommendedQuote);
+        } else {
+            Helpers.showError('No recommended quote available');
+        }
+    });
+    
+    // Export PDF button in summary view
+    document.getElementById('export-pdf-summary-btn')?.addEventListener('click', () => {
+        exportQuotesToPDF(modalQuotesState.allQuotes);
+    });
+    
+    // View all quotes link
+    document.getElementById('view-all-quotes-link')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        showAllQuotesView();
     });
 }
 
@@ -5828,111 +5851,65 @@ function renderQuoteComparison(quotes) {
         }, quotesWithDelivery[0])
         : null;
     
-    // Create comparison table
-    const tableWrapper = document.createElement('div');
-    tableWrapper.className = 'quote-comparison-table-wrapper';
-    
-    const table = document.createElement('table');
-    table.className = 'comparison-table';
-    
-    // Table header
-    const thead = document.createElement('thead');
-    thead.className = 'comparison-header';
-    thead.innerHTML = `
-        <tr>
-            <th>Supplier</th>
-            <th>Unit Price</th>
-            <th>Total Price</th>
-            <th>Lead Time</th>
-            <th>Validity</th>
-            <th>Payment Terms</th>
-            <th>Quote Date</th>
-            <th>Status</th>
-        </tr>
-    `;
-    
-    // Calculate lowest prices for highlighting (before creating rows)
-    const unitPrices = quotes
-        .map(q => {
-            const up = parseFloat(q.unit_price) || parseFloat(q.total_price) || parseFloat(q.price) || 0;
-            return up > 0 ? up : null;
-        })
-        .filter(p => p !== null && p > 0);
-    const totalPrices = quotes
-        .map(q => {
-            const tp = parseFloat(q.total_price) || parseFloat(q.price) || 0;
-            return tp > 0 ? tp : null;
-        })
-        .filter(p => p !== null && p > 0);
-    
-    const lowestUnitPrice = unitPrices.length > 0 ? Math.min(...unitPrices) : null;
-    const lowestTotalPrice = totalPrices.length > 0 ? Math.min(...totalPrices) : null;
-    
-    // Table body
-    const tbody = document.createElement('tbody');
+    // Create cards container
+    const cardsContainer = document.createElement('div');
+    cardsContainer.className = 'quote-cards-container';
     
     quotes.forEach((quote, index) => {
-        const row = document.createElement('tr');
-        row.className = 'comparison-row';
-        if (index % 2 === 0) {
-            row.classList.add('even-row');
-        }
-        
         // Handle quotes with minimal information gracefully
         const unitPrice = quote.unit_price ? parseFloat(quote.unit_price) : null;
         const totalPrice = quote.total_price ? parseFloat(quote.total_price) : null;
         const price = quote.price ? parseFloat(quote.price) : null;
         
-        // For comparison, use numeric values
-        const unitPriceNum = unitPrice !== null && !isNaN(unitPrice) ? unitPrice : (totalPrice !== null && !isNaN(totalPrice) ? totalPrice : (price !== null && !isNaN(price) ? price : 0));
-        const totalPriceNum = totalPrice !== null && !isNaN(totalPrice) ? totalPrice : (price !== null && !isNaN(price) ? price : (unitPrice !== null && !isNaN(unitPrice) ? unitPrice : 0));
+        // For display, use unit price if available, otherwise total or price
+        const displayPrice = unitPrice !== null && !isNaN(unitPrice) && unitPrice > 0 
+            ? unitPrice 
+            : (totalPrice !== null && !isNaN(totalPrice) && totalPrice > 0 
+                ? totalPrice 
+                : (price !== null && !isNaN(price) && price > 0 ? price : null));
         
-        // Check if this is the lowest
-        const isLowestUnit = unitPriceNum > 0 && lowestUnitPrice !== null && unitPriceNum === lowestUnitPrice;
-        const isLowestTotal = totalPriceNum > 0 && lowestTotalPrice !== null && totalPriceNum === lowestTotalPrice;
+        const leadTime = quote.lead_time || quote.delivery_time || '';
+        const contactInfo = quote.supplier_email || quote.supplier_id || '';
         
-        row.innerHTML = `
-            <td class="comparison-cell supplier-cell">
-                <strong>${Helpers.escapeHtml(quote.supplier_name || 'Unknown')}</strong>
-            </td>
-            <td class="comparison-cell price-cell ${isLowestUnit ? 'best-price' : ''}">
-                ${unitPriceNum > 0 ? `
-                    <span class="price-value">${Helpers.formatCurrency(unitPriceNum, quote.currency || 'USD')}</span>
-                    ${isLowestUnit ? '<span class="price-badge">Best</span>' : ''}
-                ` : '<span class="no-data">-</span>'}
-            </td>
-            <td class="comparison-cell price-cell ${isLowestTotal ? 'best-price' : ''}">
-                ${totalPriceNum > 0 ? `
-                    <span class="price-value">${Helpers.formatCurrency(totalPriceNum, quote.currency || 'USD')}</span>
-                    ${isLowestTotal ? '<span class="price-badge">Best</span>' : ''}
-                ` : '<span class="no-data">-</span>'}
-            </td>
-            <td class="comparison-cell">
-                ${quote.lead_time || quote.delivery_time || '<span class="no-data">-</span>'}
-            </td>
-            <td class="comparison-cell">
-                ${quote.validity || quote.validity_period || '<span class="no-data">-</span>'}
-            </td>
-            <td class="comparison-cell">
-                ${quote.payment_terms || '<span class="no-data">-</span>'}
-            </td>
-            <td class="comparison-cell">
-                ${quote.quote_date ? Helpers.formatDate(quote.quote_date) : '<span class="no-data">-</span>'}
-            </td>
-            <td class="comparison-cell status-cell">
-                <span class="quote-status-badge ${(quote.status || '').toLowerCase().replace(/\s+/g, '-')}">
-                    ${Helpers.escapeHtml(quote.status || 'Pending')}
-                </span>
-            </td>
+        // Build meta line (payment terms and validity)
+        const metaParts = [];
+        if (quote.payment_terms) metaParts.push(Helpers.escapeHtml(quote.payment_terms));
+        if (quote.validity || quote.validity_period) metaParts.push(Helpers.escapeHtml(quote.validity || quote.validity_period));
+        const metaLine = metaParts.length > 0 ? metaParts.join(' • ') : '';
+        
+        const card = document.createElement('div');
+        card.className = 'quote-card';
+        if (quoteComparisonState.selectedIndex === index) {
+            card.classList.add('selected');
+        }
+        card.dataset.quoteIndex = index;
+        
+        card.innerHTML = `
+            <div class="quote-card-header">
+                <div class="quote-card-main">
+                    <div class="quote-card-supplier">${Helpers.escapeHtml(quote.supplier_name || 'Unknown')}</div>
+                    ${contactInfo ? `<div class="quote-card-contact">${Helpers.escapeHtml(contactInfo)}</div>` : ''}
+                </div>
+                ${displayPrice !== null ? `<div class="quote-card-price">${Helpers.formatCurrency(displayPrice, quote.currency || 'USD')}</div>` : '<div class="quote-card-price">-</div>'}
+            </div>
+            ${leadTime ? `<div class="quote-card-leadtime">${Helpers.escapeHtml(leadTime)}</div>` : ''}
+            ${metaLine ? `<div class="quote-card-meta">${metaLine}</div>` : ''}
         `;
         
-        tbody.appendChild(row);
+        // Add click handler for selection
+        card.addEventListener('click', () => {
+            // Remove selected class from all cards
+            cardsContainer.querySelectorAll('.quote-card').forEach(c => c.classList.remove('selected'));
+            // Add selected class to clicked card
+            card.classList.add('selected');
+            // Update state
+            quoteComparisonState.selectedIndex = index;
+        });
+        
+        cardsContainer.appendChild(card);
     });
     
-    table.appendChild(thead);
-    table.appendChild(tbody);
-    tableWrapper.appendChild(table);
-    container.appendChild(tableWrapper);
+    container.appendChild(cardsContainer);
     
     // Enhanced summary
     const summaryContainer = document.getElementById('summary-content');
@@ -6004,8 +5981,111 @@ let modalQuotesState = {
         search: '',
         bestPrice: false,
         fastestDelivery: false
-    }
+    },
+    selectedIndex: null
 };
+
+// State for main quote comparison
+let quoteComparisonState = {
+    selectedIndex: null,
+    recommendedQuote: null
+};
+
+/**
+ * Calculate the recommended quote based on price and lead time scoring
+ * Score = normalizedPrice * 0.7 + normalizedLeadTime * 0.3
+ * Lower score = better recommendation
+ */
+function calculateRecommendedQuote(quotes) {
+    // Filter quotes with valid unit price (required for recommendation)
+    const validQuotes = quotes.filter(q => {
+        const price = parseFloat(q.unit_price);
+        return price && price > 0 && !isNaN(price);
+    });
+    
+    if (validQuotes.length === 0) return null;
+    
+    // If only one valid quote, return it
+    if (validQuotes.length === 1) {
+        return {
+            quote: validQuotes[0],
+            reason: 'Only quote with valid pricing'
+        };
+    }
+    
+    // Normalize prices (0 = best/lowest, 1 = worst/highest)
+    const prices = validQuotes.map(q => parseFloat(q.unit_price));
+    const minPrice = Math.min(...prices);
+    const maxPrice = Math.max(...prices);
+    
+    // Parse lead times to numeric days (simple heuristic)
+    const parseLeadTime = (lt) => {
+        if (!lt) return null;
+        const match = lt.match(/(\d+)/);
+        return match ? parseInt(match[1]) : null;
+    };
+    
+    const leadTimes = validQuotes.map(q => parseLeadTime(q.lead_time || q.delivery_time));
+    const validLeadTimes = leadTimes.filter(t => t !== null);
+    const minLead = validLeadTimes.length > 0 ? Math.min(...validLeadTimes) : 0;
+    const maxLead = validLeadTimes.length > 0 ? Math.max(...validLeadTimes) : 0;
+    
+    // Calculate scores for each quote
+    let bestScore = Infinity;
+    let recommendedQuote = null;
+    let recommendedIndex = -1;
+    
+    validQuotes.forEach((quote, i) => {
+        const price = parseFloat(quote.unit_price);
+        // Normalize price: 0 = lowest price, 1 = highest price
+        const normPrice = maxPrice === minPrice ? 0 : (price - minPrice) / (maxPrice - minPrice);
+        
+        const leadTime = leadTimes[i];
+        let normLead = 0.5; // Neutral if lead time is missing
+        if (leadTime !== null && maxLead !== minLead) {
+            // Normalize lead time: 0 = fastest, 1 = slowest
+            normLead = (leadTime - minLead) / (maxLead - minLead);
+        } else if (leadTime !== null) {
+            // Only one valid lead time - treat as best
+            normLead = 0;
+        }
+        
+        // Calculate weighted score (lower is better)
+        const score = normPrice * 0.7 + normLead * 0.3;
+        
+        if (score < bestScore) {
+            bestScore = score;
+            recommendedQuote = quote;
+            recommendedIndex = i;
+        }
+    });
+    
+    // Determine the reason for recommendation
+    let reason = 'Lowest combined price and delivery time';
+    
+    if (recommendedQuote) {
+        const recPrice = parseFloat(recommendedQuote.unit_price);
+        const recLeadTime = leadTimes[recommendedIndex];
+        
+        // Check if it's the lowest price
+        const isLowestPrice = recPrice === minPrice;
+        // Check if it has the fastest delivery
+        const isFastestDelivery = recLeadTime !== null && recLeadTime === minLead;
+        
+        if (isLowestPrice && isFastestDelivery) {
+            reason = 'Lowest price with fastest delivery';
+        } else if (isLowestPrice) {
+            reason = 'Lowest unit price';
+        } else if (isFastestDelivery) {
+            reason = 'Best balance of price and fast delivery';
+        }
+    }
+    
+    return recommendedQuote ? {
+        quote: recommendedQuote,
+        reason: reason
+    } : null;
+}
 
 /**
  * Open the quote comparison modal
@@ -6036,6 +6116,7 @@ async function openQuoteComparisonModal() {
         // Store in state
         modalQuotesState.allQuotes = quotes;
         modalQuotesState.filteredQuotes = [...quotes];
+        modalQuotesState.selectedIndex = null; // Reset selection when modal opens
         
         // Apply initial sort
         const [sortField, sortDirection] = modalQuotesState.sortBy.split('_');
@@ -6164,14 +6245,17 @@ function extractQuoteFromEmail(email, materialCode) {
 }
 
 /**
- * Render quote comparison in the modal
+ * Render quote comparison in the modal (summary-only default view)
  */
 function renderQuoteComparisonModal(quotes) {
     const loadingEl = document.getElementById('quote-comparison-loading');
+    const tableContainer = document.getElementById('quote-comparison-table-container');
     const tableWrapper = document.getElementById('quote-comparison-table-wrapper');
     const emptyState = document.getElementById('quote-comparison-empty');
     const summaryCards = document.getElementById('quote-summary-cards');
     const countDisplay = document.getElementById('quote-count-display');
+    const actionsContainer = document.getElementById('quote-comparison-actions');
+    const toolbar = document.getElementById('quote-comparison-toolbar');
     
     // Hide loading
     if (loadingEl) Helpers.hideElement(loadingEl);
@@ -6182,20 +6266,63 @@ function renderQuoteComparisonModal(quotes) {
     }
     
     if (quotes.length === 0) {
-        if (tableWrapper) Helpers.hideElement(tableWrapper);
+        if (tableContainer) Helpers.hideElement(tableContainer);
         if (emptyState) Helpers.showElement(emptyState);
-        if (summaryCards) summaryCards.innerHTML = '';
+        if (summaryCards) summaryCards.innerHTML = '<p class="no-quotes-message">No quotes available</p>';
+        if (actionsContainer) Helpers.hideElement(actionsContainer);
         return;
     }
     
+    // Hide empty state
     if (emptyState) Helpers.hideElement(emptyState);
-    if (tableWrapper) Helpers.showElement(tableWrapper);
     
-    // Render summary cards
+    // SUMMARY-ONLY DEFAULT VIEW: Hide table container and toolbar by default
+    if (tableContainer) Helpers.hideElement(tableContainer);
+    if (toolbar) Helpers.hideElement(toolbar);
+    if (tableWrapper) Helpers.hideElement(tableWrapper);
+    
+    // Show actions
+    if (actionsContainer) Helpers.showElement(actionsContainer);
+    
+    // Render summary cards with 4 KPIs (includes recommended quote calculation)
     renderSummaryCards(quotes, summaryCards);
     
-    // Render comparison table
+    // Pre-render the comparison table (hidden) so it's ready when user clicks "View all quotes"
     renderModalComparisonTable(quotes, tableWrapper);
+}
+
+/**
+ * Show all quotes view (called when "View all quotes" is clicked)
+ */
+function showAllQuotesView() {
+    const tableContainer = document.getElementById('quote-comparison-table-container');
+    const tableWrapper = document.getElementById('quote-comparison-table-wrapper');
+    const toolbar = document.getElementById('quote-comparison-toolbar');
+    const viewAllLink = document.querySelector('.view-all-link');
+    
+    // Show table container and toolbar
+    if (tableContainer) Helpers.showElement(tableContainer);
+    if (tableWrapper) Helpers.showElement(tableWrapper);
+    if (toolbar) Helpers.showElement(toolbar);
+    
+    // Hide the "View all quotes" link
+    if (viewAllLink) viewAllLink.style.display = 'none';
+}
+
+/**
+ * Hide all quotes view (return to summary-only view)
+ */
+function hideAllQuotesView() {
+    const tableContainer = document.getElementById('quote-comparison-table-container');
+    const toolbar = document.getElementById('quote-comparison-toolbar');
+    const viewAllLink = document.querySelector('.view-all-link');
+    
+    // Hide table container and toolbar
+    if (tableContainer) Helpers.hideElement(tableContainer);
+    if (toolbar) Helpers.hideElement(toolbar);
+    
+    // Show the "View all quotes" link
+    if (viewAllLink) viewAllLink.style.display = '';
 }
 
 /**
@@ -6203,23 +6330,41 @@ function renderQuoteComparisonModal(quotes) {
  */
 function renderSummaryCards(quotes, container) {
     if (!container) return;
-    
+
     // Calculate average unit price using ONLY unit_price (not total_price fallback)
     const unitPrices = quotes
         .map(q => parseFloat(q.unit_price))
         .filter(p => p !== null && p > 0 && !isNaN(p));
-    const averageUnitPrice = unitPrices.length > 0 
-        ? unitPrices.reduce((a, b) => a + b, 0) / unitPrices.length 
+    const averageUnitPrice = unitPrices.length > 0
+        ? unitPrices.reduce((a, b) => a + b, 0) / unitPrices.length
         : null;
-    
+
     // Get currency from first quote with unit_price, or default to USD
     const quoteWithCurrency = quotes.find(q => q.unit_price && parseFloat(q.unit_price) > 0) || quotes[0];
     const currency = quoteWithCurrency?.currency || 'USD';
-    
-    // Find fastest delivery
+
+    // Find best price quote
+    const quotesWithPrice = quotes.filter(q => {
+        const price = parseFloat(q.unit_price);
+        return price && price > 0 && !isNaN(price);
+    });
+    let bestPriceQuote = null;
+    if (quotesWithPrice.length > 0) {
+        bestPriceQuote = quotesWithPrice.reduce((best, current) => {
+            const bestPrice = parseFloat(best.unit_price);
+            const currentPrice = parseFloat(current.unit_price);
+            return currentPrice < bestPrice ? current : best;
+        }, quotesWithPrice[0]);
+    }
+
+    // Find fastest delivery quote
     const quotesWithDelivery = quotes.filter(q => q.delivery_time || q.lead_time);
     const fastestQuote = quotesWithDelivery.length > 0 ? quotesWithDelivery[0] : null;
-    
+
+    // Calculate recommended quote
+    const recommendation = calculateRecommendedQuote(quotes);
+    quoteComparisonState.recommendedQuote = recommendation?.quote || null;
+
     container.innerHTML = `
         <div class="summary-card">
             <div class="summary-card-content">
@@ -6229,9 +6374,29 @@ function renderSummaryCards(quotes, container) {
         </div>
         <div class="summary-card">
             <div class="summary-card-content">
+                <div class="summary-card-label">Best Price</div>
+                <div class="summary-card-value">${bestPriceQuote ? Helpers.formatCurrency(parseFloat(bestPriceQuote.unit_price), currency) : 'N/A'}</div>
+                ${bestPriceQuote ? `<div class="summary-card-subtext">${Helpers.escapeHtml(bestPriceQuote.supplier_name || '')}</div>` : ''}
+            </div>
+        </div>
+        <div class="summary-card">
+            <div class="summary-card-content">
                 <div class="summary-card-label">Fastest Delivery</div>
                 <div class="summary-card-value">${fastestQuote ? Helpers.escapeHtml(fastestQuote.delivery_time || fastestQuote.lead_time || 'N/A') : 'N/A'}</div>
                 ${fastestQuote && fastestQuote.supplier_name ? `<div class="summary-card-subtext">${Helpers.escapeHtml(fastestQuote.supplier_name)}</div>` : ''}
+            </div>
+        </div>
+        <div class="summary-card summary-card-recommended">
+            <div class="summary-card-content">
+                <div class="summary-card-label">Recommended</div>
+                ${recommendation ? `
+                    <div class="summary-card-value">${Helpers.escapeHtml(recommendation.quote.supplier_name || 'Unknown')}</div>
+                    <div class="summary-card-subtext">
+                        ${Helpers.formatCurrency(parseFloat(recommendation.quote.unit_price), currency)}
+                        ${recommendation.quote.lead_time || recommendation.quote.delivery_time ? ` • ${Helpers.escapeHtml(recommendation.quote.lead_time || recommendation.quote.delivery_time)}` : ''}
+                    </div>
+                    <div class="summary-card-reason">${Helpers.escapeHtml(recommendation.reason)}</div>
+                ` : '<div class="summary-card-value">N/A</div>'}
             </div>
         </div>
     `;
@@ -6243,123 +6408,67 @@ function renderSummaryCards(quotes, container) {
 function renderModalComparisonTable(quotes, container) {
     if (!container) return;
     
-    // Calculate best prices for highlighting
-    const unitPrices = quotes
-        .map(q => {
-            const up = parseFloat(q.unit_price) || parseFloat(q.total_price) || parseFloat(q.price) || 0;
-            return up > 0 ? up : null;
-        })
-        .filter(p => p !== null && p > 0);
-    
-    const totalPrices = quotes
-        .map(q => {
-            const tp = parseFloat(q.total_price) || parseFloat(q.price) || 0;
-            return tp > 0 ? tp : null;
-        })
-        .filter(p => p !== null && p > 0);
-    
-    const lowestUnitPrice = unitPrices.length > 0 ? Math.min(...unitPrices) : null;
-    const lowestTotalPrice = totalPrices.length > 0 ? Math.min(...totalPrices) : null;
-    
-    // Find fastest delivery time
-    const deliveryTimes = quotes
-        .map(q => q.delivery_time || q.lead_time)
-        .filter(t => t && t.trim().length > 0);
-    
-    const fastestDelivery = deliveryTimes.length > 0 ? deliveryTimes[0] : null;
-    
-    // Create table
-    const table = document.createElement('table');
-    table.className = 'quote-comparison-table';
-    
-    // Table header
-    const thead = document.createElement('thead');
-    thead.innerHTML = `
-        <tr>
-            <th>Supplier</th>
-            <th>Unit Price</th>
-            <th>Total Price</th>
-            <th>Lead Time</th>
-            <th>Validity</th>
-            <th>Payment Terms</th>
-            <th>Quote Date</th>
-            <th>Actions</th>
-        </tr>
-    `;
-    
-    // Table body
-    const tbody = document.createElement('tbody');
+    // Create cards container
+    const cardsContainer = document.createElement('div');
+    cardsContainer.className = 'quote-cards-container';
     
     quotes.forEach((quote, index) => {
-        const row = document.createElement('tr');
-        row.className = 'comparison-row';
-        row.dataset.quoteIndex = index;
+        // Handle quotes with minimal information gracefully
+        const unitPrice = quote.unit_price ? parseFloat(quote.unit_price) : null;
+        const totalPrice = quote.total_price ? parseFloat(quote.total_price) : null;
+        const price = quote.price ? parseFloat(quote.price) : null;
         
-        if (index % 2 === 0) {
-            row.classList.add('even-row');
+        // For display, use unit price if available, otherwise total or price
+        const displayPrice = unitPrice !== null && !isNaN(unitPrice) && unitPrice > 0 
+            ? unitPrice 
+            : (totalPrice !== null && !isNaN(totalPrice) && totalPrice > 0 
+                ? totalPrice 
+                : (price !== null && !isNaN(price) && price > 0 ? price : null));
+        
+        const leadTime = quote.delivery_time || quote.lead_time || '';
+        const contactInfo = quote.supplier_email || quote.supplier_id || '';
+        
+        // Build meta line (payment terms and validity)
+        const metaParts = [];
+        if (quote.payment_terms) metaParts.push(Helpers.escapeHtml(quote.payment_terms));
+        if (quote.validity || quote.validity_period) metaParts.push(Helpers.escapeHtml(quote.validity || quote.validity_period));
+        const metaLine = metaParts.length > 0 ? metaParts.join(' • ') : '';
+        
+        const card = document.createElement('div');
+        card.className = 'quote-card';
+        if (modalQuotesState.selectedIndex === index) {
+            card.classList.add('selected');
         }
+        card.dataset.quoteIndex = index;
         
-        const unitPrice = parseFloat(quote.unit_price) || 0;
-        const totalPrice = parseFloat(quote.total_price) || parseFloat(quote.price) || 0;
-        const deliveryTime = quote.delivery_time || quote.lead_time || '';
-        
-        const isLowestUnit = unitPrice > 0 && lowestUnitPrice !== null && unitPrice === lowestUnitPrice;
-        const isLowestTotal = totalPrice > 0 && lowestTotalPrice !== null && totalPrice === lowestTotalPrice;
-        const isFastest = deliveryTime && deliveryTime === fastestDelivery;
-        
-        row.innerHTML = `
-            <td class="supplier-cell">
-                <strong>${Helpers.escapeHtml(quote.supplier_name || 'Unknown')}</strong>
-                <div class="supplier-email">${Helpers.escapeHtml(quote.supplier_email || '')}</div>
-            </td>
-            <td class="price-cell ${isLowestUnit ? 'best-price' : ''}">
-                ${unitPrice > 0 ? `
-                    <span class="price-value">${Helpers.formatCurrency(unitPrice, quote.currency || 'USD')}</span>
-                    ${isLowestUnit ? '<span class="best-badge">Best</span>' : ''}
-                ` : '<span class="no-data">-</span>'}
-            </td>
-            <td class="price-cell ${isLowestTotal ? 'best-price' : ''}">
-                ${totalPrice > 0 ? `
-                    <span class="price-value">${Helpers.formatCurrency(totalPrice, quote.currency || 'USD')}</span>
-                    ${isLowestTotal ? '<span class="best-badge">Best</span>' : ''}
-                ` : '<span class="no-data">-</span>'}
-            </td>
-            <td class="delivery-cell ${isFastest ? 'fastest-delivery' : ''}">
-                ${deliveryTime ? `
-                    ${Helpers.escapeHtml(deliveryTime)}
-                    ${isFastest ? '<span class="fastest-badge">Fastest</span>' : ''}
-                ` : '<span class="no-data">-</span>'}
-            </td>
-            <td>${quote.validity || quote.validity_period || '<span class="no-data">-</span>'}</td>
-            <td>${quote.payment_terms || '<span class="no-data">-</span>'}</td>
-            <td>${quote.quote_date ? Helpers.formatDate(quote.quote_date) : '<span class="no-data">-</span>'}</td>
-            <td class="actions-cell">
-                <button class="ms-Button ms-Button--small accept-quote-row-btn" data-quote-index="${index}">
-                    <span class="ms-Button-label">Accept</span>
-                </button>
-            </td>
+        card.innerHTML = `
+            <div class="quote-card-header">
+                <div class="quote-card-main">
+                    <div class="quote-card-supplier">${Helpers.escapeHtml(quote.supplier_name || 'Unknown')}</div>
+                    ${contactInfo ? `<div class="quote-card-contact">${Helpers.escapeHtml(contactInfo)}</div>` : ''}
+                </div>
+                ${displayPrice !== null ? `<div class="quote-card-price">${Helpers.formatCurrency(displayPrice, quote.currency || 'USD')}</div>` : '<div class="quote-card-price">-</div>'}
+            </div>
+            ${leadTime ? `<div class="quote-card-leadtime">${Helpers.escapeHtml(leadTime)}</div>` : ''}
+            ${metaLine ? `<div class="quote-card-meta">${metaLine}</div>` : ''}
         `;
         
-        tbody.appendChild(row);
+        // Add click handler for selection
+        card.addEventListener('click', () => {
+            // Remove selected class from all cards
+            cardsContainer.querySelectorAll('.quote-card').forEach(c => c.classList.remove('selected'));
+            // Add selected class to clicked card
+            card.classList.add('selected');
+            // Update state
+            modalQuotesState.selectedIndex = index;
+        });
+        
+        cardsContainer.appendChild(card);
     });
-    
-    table.appendChild(thead);
-    table.appendChild(tbody);
     
     // Clear and append
     Helpers.clearChildren(container);
-    container.appendChild(table);
-    
-    // Attach event handlers for accept buttons
-    container.querySelectorAll('.accept-quote-row-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            const index = parseInt(btn.dataset.quoteIndex);
-            const quote = quotes[index];
-            if (quote) {
-                handleAcceptQuoteFromModal(quote);
-            }
-        });
-    });
+    container.appendChild(cardsContainer);
 }
 
 /**
@@ -6480,6 +6589,7 @@ function applyModalFiltersAndSort() {
     
     // Update state
     modalQuotesState.filteredQuotes = filtered;
+    modalQuotesState.selectedIndex = null; // Reset selection when filters change
     
     // Re-render
     const tableWrapper = document.getElementById('quote-comparison-table-wrapper');
@@ -6547,6 +6657,7 @@ function exportQuotesToCSV(quotes) {
 
 /**
  * Export quotes to PDF (using browser print)
+ * Generates full detailed table from data, not from DOM
  */
 function exportQuotesToPDF(quotes) {
     if (quotes.length === 0) {
@@ -6554,48 +6665,80 @@ function exportQuotesToPDF(quotes) {
         return;
     }
     
+    // Get RFQ subject from first quote or use default
+    const rfqSubject = quotes[0]?.subject || 'Quote Comparison';
+    const timestamp = new Date().toLocaleString();
+    
+    // Build table HTML from data (not from DOM)
+    const tableRows = quotes.map(quote => {
+        const unitPrice = parseFloat(quote.unit_price) || 0;
+        const totalPrice = parseFloat(quote.total_price) || parseFloat(quote.price) || 0;
+        const currency = quote.currency || 'USD';
+        const notes = (quote.notes || '').substring(0, 100) + ((quote.notes || '').length > 100 ? '...' : '');
+        
+        return `<tr>
+            <td>${Helpers.escapeHtml(quote.supplier_name || '-')}</td>
+            <td>${Helpers.escapeHtml(quote.supplier_email || '-')}</td>
+            <td>${unitPrice > 0 ? Helpers.formatCurrency(unitPrice, currency) : '-'}</td>
+            <td>${totalPrice > 0 ? Helpers.formatCurrency(totalPrice, currency) : '-'}</td>
+            <td>${Helpers.escapeHtml(quote.lead_time || quote.delivery_time || '-')}</td>
+            <td>${Helpers.escapeHtml(quote.payment_terms || '-')}</td>
+            <td>${Helpers.escapeHtml(quote.validity || quote.validity_period || '-')}</td>
+            <td>${Helpers.escapeHtml(notes || '-')}</td>
+        </tr>`;
+    }).join('');
+    
     // Create a printable version
     const printWindow = window.open('', '_blank');
-    const tableWrapper = document.getElementById('quote-comparison-table-wrapper');
-    const summaryCards = document.getElementById('quote-summary-cards');
     
-    if (!tableWrapper || !summaryCards) {
-        Helpers.showError('Could not generate PDF');
+    if (!printWindow) {
+        Helpers.showError('Could not open print window. Please allow popups.');
         return;
     }
     
-    // Get table HTML
-    const tableHTML = tableWrapper.innerHTML;
-    const summaryHTML = summaryCards.innerHTML;
-    
-    // Create print document
+    // Create print document with full table from data
     printWindow.document.write(`
         <!DOCTYPE html>
         <html>
         <head>
-            <title>Quote Comparison</title>
+            <title>Quote Comparison Report</title>
             <style>
-                body { font-family: Arial, sans-serif; padding: 20px; }
-                h1 { color: #0d3d61; }
-                .summary-cards-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 30px; }
-                .summary-card { border: 1px solid #ddd; padding: 15px; border-radius: 4px; }
-                .summary-card-label { font-size: 12px; color: #666; }
-                .summary-card-value { font-size: 24px; font-weight: bold; margin: 5px 0; }
-                table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-                th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-                th { background-color: #0d3d61; color: white; }
-                .best-price { background-color: #d4edda !important; }
-                .fastest-delivery { background-color: #d1ecf1 !important; }
+                body { font-family: Arial, sans-serif; padding: 20px; font-size: 12px; }
+                h1 { color: #0d3d61; margin-bottom: 5px; font-size: 24px; }
+                .meta { color: #666; margin-bottom: 20px; }
+                .meta p { margin: 3px 0; }
+                table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+                th, td { border: 1px solid #ddd; padding: 8px; text-align: left; font-size: 11px; }
+                th { background-color: #0d3d61; color: white; font-weight: 600; }
+                tr:nth-child(even) { background-color: #f9f9f9; }
                 @media print {
                     .no-print { display: none; }
+                    body { padding: 10px; }
                 }
             </style>
         </head>
         <body>
             <h1>Quote Comparison Report</h1>
-            <p>Generated: ${new Date().toLocaleString()}</p>
-            <div class="summary-cards-grid">${summaryHTML}</div>
-            ${tableHTML}
+            <div class="meta">
+                <p><strong>RFQ:</strong> ${Helpers.escapeHtml(rfqSubject)}</p>
+                <p><strong>Generated:</strong> ${timestamp}</p>
+                <p><strong>Total Quotes:</strong> ${quotes.length}</p>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Supplier</th>
+                        <th>Email</th>
+                        <th>Unit Price</th>
+                        <th>Total Price</th>
+                        <th>Lead Time</th>
+                        <th>Payment Terms</th>
+                        <th>Validity</th>
+                        <th>Notes</th>
+                    </tr>
+                </thead>
+                <tbody>${tableRows}</tbody>
+            </table>
         </body>
         </html>
     `);
