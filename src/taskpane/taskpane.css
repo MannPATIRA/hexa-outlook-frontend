@@ -1002,14 +1002,29 @@ main {
 }
 
 .quote-field span {
-    font-size: 14px;
+    font-size: 15px;
     color: #323130;
 }
 
-.quote-field .price-value {
+/* Unit Price - primary visual signal */
+.quote-field:nth-child(2) .price-value {
+    font-size: 22px;
+    font-weight: 600;
+    color: #0d3d61;
+}
+
+/* Total Price - secondary */
+.quote-field:nth-child(3) .price-value {
     font-size: 18px;
     font-weight: 600;
-    color: #107c10;
+    color: #323130;
+}
+
+/* Supplier name - prevent wrapping */
+.quote-field:first-child span {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .quote-actions {
