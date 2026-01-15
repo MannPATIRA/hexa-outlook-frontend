@@ -1114,6 +1114,14 @@ function closeDraftDetailsModal() {
 async function loadRfqProgress(state) {
     const sentCount = state.sentCount || 0;
     const autoRepliesScheduled = state.autoRepliesScheduled || 0;
+    const materialCodes = state.materialCodes || [];
+    
+    // Warn if no material codes tracked (legacy state)
+    if (materialCodes.length === 0 && sentCount > 0) {
+        console.warn('No material codes in state - counting all folders (may include old replies from previous RFQs)');
+    } else if (materialCodes.length > 0) {
+        console.log(`Filtering replies for material codes: ${materialCodes.join(', ')}`);
+    }
     
     // Helper function to set progress item state
     const setProgressItemState = (itemElement, state) => {
@@ -1211,11 +1219,16 @@ async function loadRfqProgress(state) {
             );
             
             if (allFolders.value) {
-                // First find all material code folders (MAT-XXXXX pattern)
+                // First find material code folders (MAT-XXXXX pattern)
+                // Only include folders for material codes that were sent in the current batch
                 const materialFolders = [];
                 for (const folder of allFolders.value) {
                     if (/^MAT-\d+$/i.test(folder.displayName)) {
-                        materialFolders.push(folder);
+                        const folderCode = folder.displayName.toUpperCase();
+                        // Only include if materialCodes is empty (legacy/fallback) or if this material code was tracked
+                        if (materialCodes.length === 0 || materialCodes.includes(folderCode)) {
+                            materialFolders.push(folder);
+                        }
                     }
                 }
                 
@@ -2294,12 +2307,16 @@ async function handleSendAllDraftsFromDraftMode() {
         
         const totalDrafts = drafts.length;
         
+        // Track material codes for all drafts being sent
+        const sentMaterialCodes = new Set();
+        
         // Persist initial state
         persistState({
             sendingInProgress: true,
             totalDrafts: totalDrafts,
             sentCount: 0,
-            autoRepliesScheduled: 0
+            autoRepliesScheduled: 0,
+            materialCodes: []
         });
         
         let sentCount = 0;
@@ -2330,6 +2347,13 @@ async function handleSendAllDraftsFromDraftMode() {
                 const recipient = draft.toRecipients?.[0]?.emailAddress?.address || 'unknown';
                 console.log(`Sending to ${recipient}... (${sentCount + 1}/${totalDrafts})`);
                 
+                // Extract material code from draft subject
+                const materialMatch = (draft.subject || '').match(/MAT-\d+/i);
+                if (materialMatch) {
+                    sentMaterialCodes.add(materialMatch[0].toUpperCase());
+                    console.log(`  Material code: ${materialMatch[0].toUpperCase()}`);
+                }
+                
                 // Send the draft and get the sent email details
                 const sendResult = await sendDraftEmailWithFullWorkflow(draft);
                 sentCount++;
@@ -2342,7 +2366,11 @@ async function handleSendAllDraftsFromDraftMode() {
                 updateProgress();
                 
                 // Update persisted state after each successful send
-                persistState({ sentCount, autoRepliesScheduled });
+                persistState({ 
+                    sentCount, 
+                    autoRepliesScheduled,
+                    materialCodes: Array.from(sentMaterialCodes)
+                });
                 
                 console.log(`✓ Sent ${sentCount}/${totalDrafts}: ${draft.subject}`);
                 
@@ -2353,24 +2381,37 @@ async function handleSendAllDraftsFromDraftMode() {
         
         // STEP 2: If we sent all non-current drafts and there's no current draft, we're done
         if (!currentDraft) {
+            const materialCodesArray = Array.from(sentMaterialCodes);
+            console.log(`Tracking replies for material codes: ${materialCodesArray.join(', ')}`);
+            
             persistState({ 
                 sendingInProgress: false, 
                 lastSendResult: 'success',
                 sentCount,
-                autoRepliesScheduled
+                autoRepliesScheduled,
+                materialCodes: materialCodesArray
             });
             updateProgress();
             
-            // Start monitoring for replies
-            startReplyMonitoring(sentCount, updateProgress);
+            // Start monitoring for replies with material codes
+            startReplyMonitoring(sentCount, updateProgress, materialCodesArray);
             
             Helpers.showSuccess(`Sent ${sentCount} RFQ(s) successfully! ${autoRepliesScheduled} auto-replies scheduled.`);
             return;
         }
         
+        // Extract material code from current draft
+        const currentMaterialMatch = (currentDraft.subject || '').match(/MAT-\d+/i);
+        if (currentMaterialMatch) {
+            sentMaterialCodes.add(currentMaterialMatch[0].toUpperCase());
+            console.log(`  Current draft material code: ${currentMaterialMatch[0].toUpperCase()}`);
+        }
+        
         // STEP 3: Send the CURRENT draft last
         // After this, the add-in WILL close because we're viewing this draft
         console.log('Sending final draft... Panel will close shortly.');
+        
+        const materialCodesArray = Array.from(sentMaterialCodes);
         
         // Mark state as complete BEFORE sending current draft (because we won't get a chance after)
         persistState({ 
@@ -2378,6 +2419,7 @@ async function handleSendAllDraftsFromDraftMode() {
             lastSendResult: 'success',
             sentCount: sentCount + 1, // Include the one we're about to send
             autoRepliesScheduled: autoRepliesScheduled + 1, // Assume it will work
+            materialCodes: materialCodesArray,
             showSuccessOnReopen: true
         });
         
@@ -2415,8 +2457,21 @@ async function handleSendAllDraftsFromDraftMode() {
 /**
  * Start monitoring for replies and update progress bars
  */
-function startReplyMonitoring(totalSent, updateProgressCallback) {
+function startReplyMonitoring(totalSent, updateProgressCallback, materialCodes = []) {
     if (!AuthService.isSignedIn()) return;
+    
+    // Get material codes from state if not provided (for legacy/fallback)
+    if (materialCodes.length === 0) {
+        const state = getPersistedState();
+        materialCodes = state.materialCodes || [];
+        if (materialCodes.length === 0 && totalSent > 0) {
+            console.warn('No material codes provided or in state - counting all folders (may include old replies)');
+        }
+    }
+    
+    if (materialCodes.length > 0) {
+        console.log(`Reply monitoring: Filtering for material codes: ${materialCodes.join(', ')}`);
+    }
     
     const repliesReceivedCount = document.getElementById('replies-received-count');
     const repliesReceivedProgress = document.getElementById('replies-received-progress');
@@ -2512,11 +2567,16 @@ function startReplyMonitoring(totalSent, updateProgressCallback) {
                 );
                 
                 if (allFolders.value) {
-                    // First find all material code folders (MAT-XXXXX pattern)
+                    // First find material code folders (MAT-XXXXX pattern)
+                    // Only include folders for material codes that were sent in the current batch
                     const materialFolders = [];
                     for (const folder of allFolders.value) {
                         if (/^MAT-\d+$/i.test(folder.displayName)) {
-                            materialFolders.push(folder);
+                            const folderCode = folder.displayName.toUpperCase();
+                            // Only include if materialCodes is empty (legacy/fallback) or if this material code was tracked
+                            if (materialCodes.length === 0 || materialCodes.includes(folderCode)) {
+                                materialFolders.push(folder);
+                            }
                         }
                     }
                     
