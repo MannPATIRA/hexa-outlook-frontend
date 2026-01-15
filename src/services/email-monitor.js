@@ -8,7 +8,7 @@ const EmailMonitor = {
     processedEmails: new Set(),
     
     // Monitoring interval (in milliseconds)
-    monitoringInterval: 30000, // 30 seconds
+    monitoringInterval: 3000, // 3 seconds
     
     // Interval ID for cleanup
     intervalId: null,

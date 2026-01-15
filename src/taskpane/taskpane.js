@@ -2961,7 +2961,7 @@ function startReplyMonitoring(totalSent, updateProgressCallback, materialCodes =
             
             console.log(`Reply monitoring: ${repliesReceived} received, ${repliesSorted} sorted out of ${totalSent} sent`);
             
-            // Update UI
+            // Update UI immediately
             if (repliesReceivedCount) repliesReceivedCount.textContent = `${repliesReceived} / ${totalSent}`;
             if (repliesReceivedProgress && totalSent > 0) {
                 repliesReceivedProgress.style.width = `${Math.min(100, (repliesReceived / totalSent) * 100)}%`;
@@ -2974,6 +2974,15 @@ function startReplyMonitoring(totalSent, updateProgressCallback, materialCodes =
                 repliesSortedProgress.style.width = '0%';
             }
             
+            // Also call the updateProgressCallback if provided to ensure UI sync
+            if (updateProgressCallback && typeof updateProgressCallback === 'function') {
+                try {
+                    updateProgressCallback();
+                } catch (e) {
+                    console.warn('Error in updateProgressCallback:', e);
+                }
+            }
+            
             // Stop monitoring if all replies are sorted
             if (repliesReceived >= totalSent && repliesSorted >= repliesReceived) {
                 console.log('All replies received and sorted - stopping monitoring');
@@ -2983,7 +2992,7 @@ function startReplyMonitoring(totalSent, updateProgressCallback, materialCodes =
         } catch (error) {
             console.warn('Error monitoring replies:', error);
         }
-    }, 5000); // Check every 5 seconds
+    }, 3000); // Check every 3 seconds
     
     // Stop after 10 minutes (give more time for replies)
     setTimeout(() => {
