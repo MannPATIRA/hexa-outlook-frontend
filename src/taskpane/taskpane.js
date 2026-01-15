@@ -4157,10 +4157,21 @@ function renderPRList(prs) {
     }
     
     prs.forEach(pr => {
+        // Get attachments from PR data (default to 2 if not specified)
+        const attachments = pr.attachments || [
+            { name: 'RFQ_Template.pdf', url: '#' },
+            { name: 'Terms_Conditions.pdf', url: '#' }
+        ];
+        
         const item = Helpers.createElement('div', {
             className: 'list-item',
             dataset: { prId: pr.pr_id },
-            onClick: () => handlePRSelect(pr)
+            onClick: (e) => {
+                // Don't trigger selection when clicking on attachment links
+                if (!e.target.closest('.pr-attachment-link')) {
+                    handlePRSelect(pr);
+                }
+            }
         }, `
             <div class="list-item-title">${Helpers.escapeHtml(pr.pr_id)}</div>
             <div class="list-item-subtitle">
@@ -4170,7 +4181,31 @@ function renderPRList(prs) {
                 Qty: ${pr.quantities || 'N/A'} ${pr.unit || ''} | 
                 Created: ${Helpers.formatDate(pr.created_date)}
             </div>
+            <div class="pr-attachments">
+                <i class="ms-Icon ms-Icon--Attach" aria-hidden="true"></i>
+                <span class="pr-attachment-count">${attachments.length} attachment${attachments.length !== 1 ? 's' : ''}</span>
+                <div class="pr-attachment-links">
+                    ${attachments.map((att, idx) => `
+                        <a href="#" class="pr-attachment-link" data-attachment-url="${Helpers.escapeHtml(att.url || '#')}" 
+                           data-attachment-name="${Helpers.escapeHtml(att.name || `Attachment_${idx + 1}.pdf`)}"
+                           title="${Helpers.escapeHtml(att.name || `Attachment ${idx + 1}`)}">
+                            ${Helpers.escapeHtml(att.name || `Attachment_${idx + 1}.pdf`)}
+                        </a>
+                    `).join('')}
+                </div>
+            </div>
         `);
+        
+        // Add click handlers for attachment links
+        item.querySelectorAll('.pr-attachment-link').forEach(link => {
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const url = link.dataset.attachmentUrl;
+                const name = link.dataset.attachmentName;
+                openAttachment(url, name);
+            });
+        });
         
         container.appendChild(item);
     });
@@ -4290,6 +4325,34 @@ function updatePRDetailsInModal() {
         if (infoContainer) infoContainer.classList.remove('hidden');
     } else {
         if (infoContainer) infoContainer.classList.add('hidden');
+    }
+}
+
+/**
+ * Open an attachment - opens in new tab/window
+ */
+function openAttachment(url, name) {
+    if (!url || url === '#') {
+        console.warn('No attachment URL provided');
+        Helpers.showError('Attachment URL not available');
+        return;
+    }
+    
+    try {
+        // If it's a full URL, open directly
+        if (url.startsWith('http://') || url.startsWith('https://')) {
+            window.open(url, '_blank');
+        } else {
+            // If it's a relative path or file path, try to construct full URL
+            // This might need adjustment based on your backend API
+            console.log(`Opening attachment: ${name} from ${url}`);
+            // For now, try opening as-is or construct from API base URL
+            const fullUrl = url.startsWith('/') ? url : `/${url}`;
+            window.open(fullUrl, '_blank');
+        }
+    } catch (error) {
+        console.error('Error opening attachment:', error);
+        Helpers.showError(`Failed to open attachment: ${name}`);
     }
 }
 
