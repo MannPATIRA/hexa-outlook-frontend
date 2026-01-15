@@ -35,23 +35,30 @@ button, input, textarea, select {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 8px 16px;
+    height: 56px;
+    padding: 0 16px;
     background-color: #0d3d61;
     color: white;
     flex-shrink: 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.15);
 }
 
 .header-left {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
+    flex: 1;
+    min-width: 0; /* Allow truncation */
 }
 
 .header-brand {
-    font-size: 18px;
+    font-size: 17px;
     font-weight: 600;
     color: white;
     letter-spacing: 0.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .header-logo {
@@ -62,7 +69,7 @@ button, input, textarea, select {
 
 .header h1 {
     font-weight: 600;
-    font-size: 18px;
+    font-size: 17px;
     margin: 0;
 }
 
@@ -70,13 +77,14 @@ button, input, textarea, select {
     display: flex;
     gap: 8px;
     align-items: center;
+    flex-shrink: 0;
 }
 
 /* Auth Status Styles */
 .auth-status {
     display: flex;
     align-items: center;
-    margin-right: 8px;
+    gap: 8px;
 }
 
 .sign-in-btn {
@@ -102,29 +110,88 @@ button, input, textarea, select {
 .user-info {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
+}
+
+/* Account Pill */
+.account-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 8px;
+    background-color: rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    max-width: 160px;
 }
 
 .user-name {
     font-size: 12px;
-    color: rgba(255, 255, 255, 0.9);
-    max-width: 120px;
+    color: rgba(255, 255, 255, 0.85);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    line-height: 1.2;
 }
 
-.header-actions button {
+/* Header Icon Buttons */
+.header-icon-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    min-height: 36px;
+    padding: 0;
     background: transparent;
     border: none;
-    color: white;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.header-icon-button:hover {
+    background-color: rgba(255, 255, 255, 0.15);
+}
+
+.header-icon-button:focus {
+    outline: 2px solid rgba(255, 255, 255, 0.5);
+    outline-offset: 2px;
+}
+
+.header-icon-button:active {
+    background-color: rgba(255, 255, 255, 0.2);
+}
+
+.header-icon-button .ms-Button-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    font-size: 18px;
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.header-icon-button .ms-Button-icon .ms-Icon {
+    font-size: 18px;
+    width: 18px;
+    height: 18px;
+    line-height: 18px;
+}
+
+/* Legacy button styles for backward compatibility */
+.header-actions button:not(.header-icon-button):not(.sign-in-btn) {
+    background: transparent;
+    border: none;
+    color: rgba(255, 255, 255, 0.9);
     cursor: pointer;
     padding: 4px;
     border-radius: 4px;
 }
 
-.header-actions button:hover {
-    background-color: rgba(255, 255, 255, 0.2);
+.header-actions button:not(.header-icon-button):not(.sign-in-btn):hover {
+    background-color: rgba(255, 255, 255, 0.15);
 }
 
 /* ==================== NAVIGATION TABS ==================== */
