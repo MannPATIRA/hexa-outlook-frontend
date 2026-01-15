@@ -847,7 +847,7 @@ function showRFQWorkflowMode() {
     // Restore header title
     const headerTitle = document.getElementById('header-title');
     if (headerTitle) {
-        headerTitle.textContent = 'Hexa';
+        headerTitle.textContent = '';
     }
     
     // Show RFQ workflow section
@@ -1632,7 +1632,7 @@ async function showClarificationMode(context) {
         // Restore header title
         const headerTitle = document.getElementById('header-title');
         if (headerTitle) {
-            headerTitle.textContent = 'Hexa';
+            headerTitle.textContent = '';
         }
         
         const email = context.email;
@@ -1882,7 +1882,7 @@ async function showQuoteMode(context) {
         // Restore header title
         const headerTitle = document.getElementById('header-title');
         if (headerTitle) {
-            headerTitle.textContent = 'Hexa';
+            headerTitle.textContent = '';
         }
         
         const email = context.email;
