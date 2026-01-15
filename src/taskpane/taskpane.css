@@ -46,7 +46,7 @@ button, input, textarea, select {
 .header-left {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     min-width: 0;
     flex: 1;
 }

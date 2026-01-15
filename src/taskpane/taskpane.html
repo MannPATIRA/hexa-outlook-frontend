@@ -24,21 +24,16 @@
         <header class="header">
             <div class="header-left">
                 <span id="header-title" class="header-brand"></span>
+                <button id="sign-in-btn" class="ms-Button ms-Button--primary sign-in-btn">
+                    <span class="ms-Button-label">Sign In</span>
+                </button>
+                <span id="user-name" class="user-name hidden"></span>
             </div>
             <div class="header-actions">
-                <!-- Auth Status -->
-                <div id="auth-status" class="auth-status">
-                    <button id="sign-in-btn" class="ms-Button ms-Button--primary sign-in-btn">
-                        <span class="ms-Button-label">Sign In</span>
-                    </button>
-                    <div id="user-info" class="user-info hidden">
-                        <span id="user-name" class="user-name"></span>
-                        <span class="account-divider"></span>
-                        <button id="sign-out-btn" class="ms-Button ms-Button--icon" title="Sign Out" aria-label="Sign Out">
-                            <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--SignOut"></i></span>
-                        </button>
-                    </div>
-                </div>
+                <span class="account-divider hidden" id="account-divider"></span>
+                <button id="sign-out-btn" class="ms-Button ms-Button--icon hidden" title="Sign Out" aria-label="Sign Out">
+                    <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--SignOut"></i></span>
+                </button>
                 <button id="refresh-btn" class="ms-Button ms-Button--icon" title="Refresh" aria-label="Refresh">
                     <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--Refresh"></i></span>
                 </button>

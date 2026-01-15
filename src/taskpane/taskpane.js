@@ -3190,19 +3190,24 @@ async function initializeAuth() {
 
 function updateAuthUI() {
     const signInBtn = document.getElementById('sign-in-btn');
-    const userInfo = document.getElementById('user-info');
     const userName = document.getElementById('user-name');
+    const accountDivider = document.getElementById('account-divider');
+    const signOutBtn = document.getElementById('sign-out-btn');
 
     if (AuthService.isSignedIn()) {
         const user = AuthService.getUser();
         signInBtn?.classList.add('hidden');
-        userInfo?.classList.remove('hidden');
+        userName?.classList.remove('hidden');
+        accountDivider?.classList.remove('hidden');
+        signOutBtn?.classList.remove('hidden');
         if (userName && user) {
             userName.textContent = user.name || user.email;
         }
     } else {
         signInBtn?.classList.remove('hidden');
-        userInfo?.classList.add('hidden');
+        userName?.classList.add('hidden');
+        accountDivider?.classList.add('hidden');
+        signOutBtn?.classList.add('hidden');
     }
 }
 
