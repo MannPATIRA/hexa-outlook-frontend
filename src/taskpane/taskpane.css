@@ -1096,22 +1096,25 @@ main {
 .clickable-step-title {
     cursor: pointer;
     user-select: none;
-    transition: color 0.2s ease;
+    transition: background-color 0.2s ease, color 0.2s ease;
     pointer-events: auto !important; /* Ensure clickable even if parent is disabled */
 }
 
 .clickable-step-title:hover {
+    background-color: #e1dfdd;
     color: #0d3d61;
 }
 
-.clickable-step-title .step-title-text {
-    text-decoration: underline;
-    text-decoration-color: transparent;
-    transition: text-decoration-color 0.2s ease;
+.clickable-step-title:active,
+.clickable-step-title:focus {
+    background-color: #c8c6c4;
+    color: #0d3d61;
+    outline: none;
 }
 
-.clickable-step-title:hover .step-title-text {
-    text-decoration-color: #0d3d61;
+.clickable-step-title .step-title-text {
+    /* Remove underline styling - we highlight the whole button instead */
+    text-decoration: none;
 }
 
 .step-header {
