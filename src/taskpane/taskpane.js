@@ -848,6 +848,7 @@ function showRFQWorkflowMode() {
     const headerTitle = document.getElementById('header-title');
     if (headerTitle) {
         headerTitle.textContent = '';
+        headerTitle.removeAttribute('title');
     }
     
     // Show RFQ workflow section
@@ -879,6 +880,7 @@ async function showDraftMode(context) {
     const headerTitle = document.getElementById('header-title');
     if (headerTitle) {
         headerTitle.textContent = 'RFQ Draft Editor';
+        headerTitle.setAttribute('title', 'RFQ Draft Editor');
     }
 
     // Load pending RFQ drafts
@@ -1680,6 +1682,7 @@ async function showClarificationMode(context) {
         const headerTitle = document.getElementById('header-title');
         if (headerTitle) {
             headerTitle.textContent = '';
+            headerTitle.removeAttribute('title');
         }
         
         const email = context.email;
@@ -1930,6 +1933,7 @@ async function showQuoteMode(context) {
         const headerTitle = document.getElementById('header-title');
         if (headerTitle) {
             headerTitle.textContent = '';
+            headerTitle.removeAttribute('title');
         }
         
         const email = context.email;
@@ -3248,7 +3252,9 @@ function updateAuthUI() {
         accountDivider?.classList.remove('hidden');
         signOutBtn?.classList.remove('hidden');
         if (userName && user) {
-            userName.textContent = user.name || user.email;
+            const userDisplayName = user.name || user.email;
+            userName.textContent = userDisplayName;
+            userName.setAttribute('title', userDisplayName);
         }
     } else {
         signInBtn?.classList.remove('hidden');
