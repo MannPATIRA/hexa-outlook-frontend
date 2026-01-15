@@ -1417,11 +1417,11 @@ function renderQuestionCards(questions, email) {
             aiLoading.style.display = q.isLoadingResponse ? 'flex' : 'none';
             aiLoading.innerHTML = '<div class="spinner-small"></div><span>Generating AI response...</span>';
             
-            // "Don't like this response?" button - only show when AI response exists and is not loading
+            // "Enter custom response" button - only show when AI response exists and is not loading
             const dontLikeButton = document.createElement('button');
             dontLikeButton.type = 'button';
             dontLikeButton.className = 'dont-like-button';
-            dontLikeButton.innerHTML = '<span class="dont-like-icon">👎</span> <span>Don\'t like this response?</span>';
+            dontLikeButton.textContent = 'Enter custom response';
             dontLikeButton.style.display = (!q.isLoadingResponse && q.aiResponse && !q.showCustomResponse) ? 'flex' : 'none';
             dontLikeButton.onclick = () => {
                 const question = AppState.questions.find(qq => qq.id === q.id);
