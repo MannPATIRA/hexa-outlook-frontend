@@ -971,6 +971,10 @@ main {
     pointer-events: none;
 }
 
+.workflow-step.disabled .step-content {
+    display: none;
+}
+
 .clickable-step-title {
     cursor: pointer;
     user-select: none;
