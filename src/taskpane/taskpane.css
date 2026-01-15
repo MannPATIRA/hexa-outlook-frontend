@@ -1043,6 +1043,33 @@ main {
     font-style: italic;
 }
 
+/* Tighter spacing for Quote Details page */
+#quote-mode .mode-body {
+    padding: 16px;
+}
+
+#quote-mode .email-info-box {
+    padding: 12px;
+    margin-bottom: 12px;
+}
+
+#quote-mode .parsed-quote-section {
+    padding: 12px;
+    margin-bottom: 12px;
+}
+
+#quote-mode .parsed-quote-section h3 {
+    margin-bottom: 12px;
+}
+
+#quote-mode .quote-data-grid {
+    gap: 8px;
+}
+
+#quote-mode .quote-actions {
+    margin-top: 16px;
+}
+
 /* ==================== WORKFLOW STEPS ==================== */
 .workflow-step {
     margin-bottom: 20px;
