@@ -1419,13 +1419,30 @@ function renderQuestionCards(questions, email) {
             aiLoading.style.display = q.isLoadingResponse ? 'flex' : 'none';
             aiLoading.innerHTML = '<div class="spinner-small"></div><span>Generating AI response...</span>';
             
+            // "Don't like this response?" button - only show when AI response exists and is not loading
+            const dontLikeButton = document.createElement('button');
+            dontLikeButton.type = 'button';
+            dontLikeButton.className = 'dont-like-button';
+            dontLikeButton.innerHTML = '<span class="dont-like-icon">👎</span> <span>Don\'t like this response?</span>';
+            dontLikeButton.style.display = (!q.isLoadingResponse && q.aiResponse && !q.showCustomResponse) ? 'flex' : 'none';
+            dontLikeButton.onclick = () => {
+                const question = AppState.questions.find(qq => qq.id === q.id);
+                if (question) {
+                    question.showCustomResponse = true;
+                    question.useCustomResponse = true;
+                    updateQuestionCard(q.id);
+                }
+            };
+            
             aiSection.appendChild(aiLabel);
             aiSection.appendChild(aiTextarea);
             aiSection.appendChild(aiLoading);
+            aiSection.appendChild(dontLikeButton);
             
-            // Custom Response section
+            // Custom Response section - hidden by default
             const customSection = document.createElement('div');
             customSection.className = 'custom-response-section';
+            customSection.style.display = q.showCustomResponse ? 'block' : 'none';
             
             const customLabel = document.createElement('label');
             customLabel.className = 'response-label';
@@ -1433,12 +1450,18 @@ function renderQuestionCards(questions, email) {
             
             const customTextarea = document.createElement('textarea');
             customTextarea.className = 'response-textarea custom-response-textarea';
-            customTextarea.rows = 4;
+            customTextarea.rows = 5;
             customTextarea.value = q.customResponse || '';
-            customTextarea.placeholder = 'Optional custom response';
+            customTextarea.placeholder = 'Enter your custom response here...';
             customTextarea.oninput = (e) => {
                 const question = AppState.questions.find(qq => qq.id === q.id);
-                if (question) question.customResponse = e.target.value;
+                if (question) {
+                    question.customResponse = e.target.value;
+                    // Automatically use custom response when user types
+                    if (e.target.value.trim()) {
+                        question.useCustomResponse = true;
+                    }
+                }
             };
             
             const useCustomCheckbox = document.createElement('label');
@@ -1451,7 +1474,7 @@ function renderQuestionCards(questions, email) {
                 if (question) question.useCustomResponse = e.target.checked;
             };
             useCustomCheckbox.appendChild(checkbox);
-            useCustomCheckbox.appendChild(document.createTextNode(' Use custom response'));
+            useCustomCheckbox.appendChild(document.createTextNode(' Use custom response instead of AI response'));
             
             customSection.appendChild(customLabel);
             customSection.appendChild(customTextarea);
@@ -1532,6 +1555,10 @@ function updateQuestionCard(questionId) {
     
     const aiTextarea = card.querySelector('.ai-response-textarea');
     const aiLoading = card.querySelector('.response-loading');
+    const dontLikeButton = card.querySelector('.dont-like-button');
+    const customSection = card.querySelector('.custom-response-section');
+    const customTextarea = card.querySelector('.custom-response-textarea');
+    const useCustomCheckbox = card.querySelector('.use-custom-checkbox input[type="checkbox"]');
     
     if (aiTextarea) {
         aiTextarea.value = question.aiResponse || '';
@@ -1541,6 +1568,25 @@ function updateQuestionCard(questionId) {
     
     if (aiLoading) {
         aiLoading.style.display = question.isLoadingResponse ? 'flex' : 'none';
+    }
+    
+    // Show "Don't like" button only when AI response exists, is not loading, and custom section is hidden
+    if (dontLikeButton) {
+        dontLikeButton.style.display = (!question.isLoadingResponse && question.aiResponse && !question.showCustomResponse) ? 'flex' : 'none';
+    }
+    
+    // Show/hide custom response section
+    if (customSection) {
+        customSection.style.display = question.showCustomResponse ? 'block' : 'none';
+    }
+    
+    // Update custom response value and checkbox
+    if (customTextarea) {
+        customTextarea.value = question.customResponse || '';
+    }
+    
+    if (useCustomCheckbox) {
+        useCustomCheckbox.checked = question.useCustomResponse;
     }
 }
 
@@ -1588,6 +1634,7 @@ async function parseAndDisplayQuestions(email) {
             aiResponse: '',
             customResponse: '',
             useCustomResponse: false,
+            showCustomResponse: false, // Only show custom response section when user doesn't like AI response
             isExpanded: false, // Start collapsed - user clicks to expand
             isLoadingResponse: false,
             hasError: false
