@@ -2507,6 +2507,10 @@ async function handleSendAllDraftsFromDraftMode() {
             const materialCodesArray = Array.from(sentMaterialCodes);
             console.log(`Tracking replies for ${sentEmails.length} sent emails with material codes: ${materialCodesArray.join(', ')}`);
             
+            // Establish baseline immediately after sending with sent email timestamps
+            console.log('Establishing baseline with sent email timestamps...');
+            await establishBaseline(materialCodesArray, sentEmails);
+            
             persistState({ 
                 sendingInProgress: false, 
                 lastSendResult: 'success',
@@ -2607,7 +2611,26 @@ async function handleSendAllDraftsFromDraftMode() {
  * Establish baseline folder counts for tracking new replies
  */
 async function establishBaseline(materialCodes, sentEmails = []) {
-    const baselineTimestamp = Date.now();
+    // Use earliest sent email time as baseline, or slightly before if not available
+    // This ensures replies received after RFQs were sent are counted
+    let baselineTimestamp = Date.now();
+    if (sentEmails && sentEmails.length > 0) {
+        const sentTimes = sentEmails
+            .map(e => e.sentDateTime ? new Date(e.sentDateTime).getTime() : null)
+            .filter(Boolean);
+        if (sentTimes.length > 0) {
+            // Use 1 minute before earliest sent email to catch any replies that came in immediately
+            const earliestSentTime = Math.min(...sentTimes);
+            baselineTimestamp = earliestSentTime - (60 * 1000);
+            console.log(`Baseline timestamp set to 1 minute before earliest sent email: ${new Date(baselineTimestamp).toISOString()}`);
+            console.log(`  Earliest sent email time: ${new Date(earliestSentTime).toISOString()}`);
+        } else {
+            console.warn('No sent email timestamps available - using current time as baseline');
+        }
+    } else {
+        console.warn('No sent emails provided - using current time as baseline');
+    }
+    
     const baselineFolderCounts = {};
     
     try {
@@ -2692,9 +2715,19 @@ async function establishBaseline(materialCodes, sentEmails = []) {
         return { baselineTimestamp, baselineFolderCounts };
     } catch (error) {
         console.error('Error establishing baseline:', error);
-        // Return fallback baseline
+        // Return fallback baseline - try to use sent email times if available
+        let fallbackTimestamp = Date.now();
+        if (sentEmails && sentEmails.length > 0) {
+            const sentTimes = sentEmails
+                .map(e => e.sentDateTime ? new Date(e.sentDateTime).getTime() : null)
+                .filter(Boolean);
+            if (sentTimes.length > 0) {
+                fallbackTimestamp = Math.min(...sentTimes) - (60 * 1000);
+                console.log(`Using fallback baseline with sent email time: ${new Date(fallbackTimestamp).toISOString()}`);
+            }
+        }
         return {
-            baselineTimestamp: Date.now(),
+            baselineTimestamp: fallbackTimestamp,
             baselineFolderCounts: {}
         };
     }
@@ -2840,7 +2873,17 @@ async function startReplyMonitoring(totalSent, updateProgressCallback, materialC
             
             // Log baseline info for debugging
             if (baselineTimestamp) {
-                console.log(`Monitoring check: Baseline timestamp: ${new Date(baselineTimestamp).toISOString()}`);
+                const baselineDate = new Date(baselineTimestamp);
+                console.log(`Monitoring check: Baseline timestamp: ${baselineDate.toISOString()} (${baselineDate.toLocaleString()})`);
+                // Show sent email times for comparison
+                if (trackedSentEmails.length > 0) {
+                    const sentTimes = trackedSentEmails
+                        .map(e => e.sentDateTime ? new Date(e.sentDateTime).toISOString() : null)
+                        .filter(Boolean);
+                    if (sentTimes.length > 0) {
+                        console.log(`  Sent email times: ${sentTimes.slice(0, 3).join(', ')}${sentTimes.length > 3 ? '...' : ''}`);
+                    }
+                }
             } else {
                 console.warn('Monitoring check: No baseline timestamp found - counting all replies');
             }
@@ -2851,6 +2894,9 @@ async function startReplyMonitoring(totalSent, updateProgressCallback, materialC
             );
             
             console.log(`Monitoring check: Tracking ${trackedConversationIds.size} conversations, ${trackedSentEmails.length} sent emails`);
+            if (trackedConversationIds.size === 0) {
+                console.warn('  WARNING: No conversation IDs to track - replies may not be detected!');
+            }
             
             let repliesReceived = 0;
             let repliesSorted = 0;
@@ -2872,18 +2918,29 @@ async function startReplyMonitoring(totalSent, updateProgressCallback, materialC
                                 const isTrackedSent = trackedSentEmails.some(e => e.id === email.id);
                                 if (isTrackedSent) continue;
                                 
-                                // Check if it's a new reply (after baseline timestamp)
+                                // Check if it's a valid supplier reply
                                 const receivedDate = new Date(email.receivedDateTime);
                                 const bodyPreview = email.bodyPreview || '';
+                                const isValidReply = isSupplierReply(email, bodyPreview);
+                                
+                                // For tracked conversations, count replies if they're valid
+                                // Baseline check is mainly for untracked emails (inbox fallback)
+                                // If baseline exists and is reasonable (before sent emails), use it
+                                // Otherwise, count all valid replies in tracked conversations
                                 const isNewAfterBaseline = !baselineTime || receivedDate > baselineTime;
                                 
-                                // Only count if it's a valid reply AND new (after baseline)
-                                if (isSupplierReply(email, bodyPreview) && 
-                                    isNewAfterBaseline &&
+                                // Count if it's a valid reply in a tracked conversation
+                                // Baseline filtering helps avoid counting very old replies, but
+                                // we trust tracked conversations more than baseline for accuracy
+                                if (isValidReply && 
+                                    (isNewAfterBaseline || !baselineTime) &&
                                     !allReplyIds.has(email.id)) {
                                     allReplyIds.add(email.id);
                                     repliesReceived++;
+                                    console.log(`  Found reply in tracked conversation: ${email.id}, received: ${receivedDate.toISOString()}, baseline: ${baselineTime ? baselineTime.toISOString() : 'none'}`);
                                     // Note: We'll check if it's sorted in Step 2 below
+                                } else if (isValidReply && !allReplyIds.has(email.id)) {
+                                    console.log(`  Reply excluded: valid=${isValidReply}, afterBaseline=${isNewAfterBaseline}, hasBaseline=${!!baselineTime}`);
                                 }
                             }
                         }
@@ -2997,19 +3054,25 @@ async function startReplyMonitoring(totalSent, updateProgressCallback, materialC
                             // Check if this email is one of our tracked replies
                             const inTrackedConversation = trackedConversationIds.has(email.conversationId);
                             const isTrackedReply = inTrackedConversation || allReplyIds.has(email.id);
+                            const isValidReply = isSupplierReply(email, bodyPreview);
                             const isNewAfterBaseline = !baselineTime || receivedDate > baselineTime;
                             
-                            // If it's a tracked reply and new after baseline, it's sorted (in folder)
-                            if (isSupplierReply(email, bodyPreview) && 
-                                isTrackedReply &&
-                                isNewAfterBaseline) {
-                                emailsInSortedFolders.add(email.id);
+                            // If it's a valid tracked reply, it's sorted (in folder)
+                            // For tracked conversations, we count even if baseline would exclude it
+                            // (baseline helps but shouldn't exclude known tracked replies)
+                            if (isValidReply && isTrackedReply) {
+                                // Count as sorted if baseline allows OR if in tracked conversation
+                                if (isNewAfterBaseline || inTrackedConversation || !baselineTime) {
+                                    emailsInSortedFolders.add(email.id);
+                                    console.log(`  Found sorted reply in folder: ${email.id}, inTrackedConv=${inTrackedConversation}, afterBaseline=${isNewAfterBaseline}`);
+                                }
                                 
                                 // Also add any new replies found here that we haven't counted yet
                                 // (only if not in tracked conversation - Step 1 already handled those)
                                 if (!inTrackedConversation && !allReplyIds.has(email.id)) {
                                     allReplyIds.add(email.id);
                                     repliesReceived++;
+                                    console.log(`  Also counting as received (found in sorted folder): ${email.id}`);
                                 }
                             }
                         }
@@ -3028,7 +3091,10 @@ async function startReplyMonitoring(totalSent, updateProgressCallback, materialC
             
             repliesSorted = sortedReplyIds.size;
             
-            console.log(`Reply monitoring check complete: ${repliesReceived} received, ${repliesSorted} sorted out of ${totalSent} sent`);
+            console.log(`Reply monitoring check complete:`);
+            console.log(`  Replies received: ${repliesReceived} / ${totalSent} (${allReplyIds.size} unique reply IDs)`);
+            console.log(`  Replies sorted: ${repliesSorted} / ${repliesReceived}`);
+            console.log(`  Sorted reply IDs: ${Array.from(sortedReplyIds).slice(0, 5).join(', ')}${sortedReplyIds.size > 5 ? '...' : ''}`);
             
             // Update UI immediately with fresh element references
             if (repliesReceivedCount) {
