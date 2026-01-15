@@ -328,21 +328,53 @@ main {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 10px 16px;
+    gap: 12px;
+    padding: 12px 16px;
     margin: 0;
-    font-size: 13px;
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 1.4;
+    border-radius: 4px;
+    animation: slideDown 0.3s ease-out;
 }
 
 .error-banner {
-    background-color: #fde7e9;
-    color: #a80000;
-    border-left: 4px solid #a80000;
+    background-color: #fef6f6;
+    color: #a4262c;
+    border-left: 4px solid #a4262c;
 }
 
 .success-banner {
-    background-color: #dff6dd;
+    background-color: #f0f9f0;
     color: #107c10;
     border-left: 4px solid #107c10;
+}
+
+/* Notification content wrapper with icon */
+.notification-content {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 1;
+    min-width: 0;
+}
+
+.notification-icon {
+    font-size: 18px;
+    flex-shrink: 0;
+    width: 18px;
+    height: 18px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.success-banner .notification-icon {
+    color: #107c10;
+}
+
+.error-banner .notification-icon {
+    color: #a4262c;
 }
 
 .error-banner.hidden,
@@ -350,17 +382,77 @@ main {
     display: none;
 }
 
+/* Notification dismiss buttons - clean and minimal */
+.error-banner .ms-Button--icon,
+.success-banner .ms-Button--icon {
+    background: transparent !important;
+    border: none !important;
+    padding: 4px !important;
+    margin: 0 !important;
+    min-width: 20px !important;
+    width: 20px !important;
+    height: 20px !important;
+    cursor: pointer;
+    flex-shrink: 0;
+    border-radius: 2px;
+    transition: background-color 0.15s ease;
+}
+
+.error-banner .ms-Button--icon:hover,
+.success-banner .ms-Button--icon:hover {
+    background-color: rgba(0, 0, 0, 0.08) !important;
+}
+
+.error-banner .ms-Button--icon:active,
+.success-banner .ms-Button--icon:active {
+    background-color: rgba(0, 0, 0, 0.12) !important;
+}
+
+.error-banner .ms-Button--icon:focus,
+.success-banner .ms-Button--icon:focus {
+    outline: 1px solid currentColor;
+    outline-offset: 2px;
+}
+
+.error-banner .ms-Button--icon .ms-Button-icon,
+.success-banner .ms-Button--icon .ms-Button-icon {
+    margin: 0 !important;
+    padding: 0 !important;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+}
+
+.error-banner .ms-Button--icon .ms-Button-icon .ms-Icon,
+.success-banner .ms-Button--icon .ms-Button-icon .ms-Icon {
+    font-size: 14px !important;
+    color: inherit;
+    opacity: 0.7;
+    transition: opacity 0.15s ease;
+}
+
+.error-banner .ms-Button--icon:hover .ms-Button-icon .ms-Icon,
+.success-banner .ms-Button--icon:hover .ms-Button-icon .ms-Icon {
+    opacity: 1;
+}
+
 /* Pin Reminder Banner */
 .pin-reminder-banner {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 10px 16px;
+    gap: 12px;
+    padding: 12px 16px;
     margin: 0;
-    font-size: 13px;
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 1.4;
     background: linear-gradient(135deg, #fff8e1 0%, #ffe082 100%);
     color: #5d4037;
     border-left: 4px solid #ffc107;
+    border-radius: 4px;
     animation: slideDown 0.3s ease-out;
 }
 
@@ -390,18 +482,54 @@ main {
     color: #e65100;
 }
 
+/* Consistent dismiss button styling for pin reminder */
 .dismiss-pin-btn {
     background: transparent !important;
     border: none !important;
+    padding: 4px !important;
+    margin: 0 !important;
+    min-width: 20px !important;
+    width: 20px !important;
+    height: 20px !important;
     color: #5d4037 !important;
     cursor: pointer;
-    padding: 4px !important;
-    border-radius: 4px;
+    border-radius: 2px;
     flex-shrink: 0;
+    transition: background-color 0.15s ease;
 }
 
 .dismiss-pin-btn:hover {
-    background-color: rgba(0, 0, 0, 0.1) !important;
+    background-color: rgba(0, 0, 0, 0.08) !important;
+}
+
+.dismiss-pin-btn:active {
+    background-color: rgba(0, 0, 0, 0.12) !important;
+}
+
+.dismiss-pin-btn:focus {
+    outline: 1px solid currentColor;
+    outline-offset: 2px;
+}
+
+.dismiss-pin-btn .ms-Button-icon {
+    margin: 0 !important;
+    padding: 0 !important;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+}
+
+.dismiss-pin-btn .ms-Button-icon .ms-Icon {
+    font-size: 14px !important;
+    color: inherit;
+    opacity: 0.7;
+    transition: opacity 0.15s ease;
+}
+
+.dismiss-pin-btn:hover .ms-Button-icon .ms-Icon {
+    opacity: 1;
 }
 
 @keyframes slideDown {
@@ -1209,22 +1337,25 @@ main {
 .clickable-step-title {
     cursor: pointer;
     user-select: none;
-    transition: color 0.2s ease;
+    transition: background-color 0.2s ease, color 0.2s ease;
     pointer-events: auto !important; /* Ensure clickable even if parent is disabled */
 }
 
 .clickable-step-title:hover {
+    background-color: #e1dfdd;
     color: #0d3d61;
 }
 
-.clickable-step-title .step-title-text {
-    text-decoration: underline;
-    text-decoration-color: transparent;
-    transition: text-decoration-color 0.2s ease;
+.clickable-step-title:active,
+.clickable-step-title:focus {
+    background-color: #c8c6c4;
+    color: #0d3d61;
+    outline: none;
 }
 
-.clickable-step-title:hover .step-title-text {
-    text-decoration-color: #0d3d61;
+.clickable-step-title .step-title-text {
+    /* Remove underline styling - we highlight the whole button instead */
+    text-decoration: none;
 }
 
 .step-header {
