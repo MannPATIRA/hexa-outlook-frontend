@@ -615,10 +615,11 @@ main {
 /* Draft Mode Specific */
 .draft-list-section {
     background: white;
-    border-radius: 8px;
+    border-radius: 2px;
+    border: 1px solid rgba(0,0,0,0.08);
     padding: 16px;
     margin-bottom: 20px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    box-shadow: none;
 }
 
 .draft-list-section h3 {
