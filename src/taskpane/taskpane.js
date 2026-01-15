@@ -4157,11 +4157,41 @@ function renderPRList(prs) {
     }
     
     prs.forEach(pr => {
-        // Get attachments from PR data (default to 2 if not specified)
-        const attachments = pr.attachments || [
-            { name: 'RFQ_Template.pdf', url: '#' },
-            { name: 'Terms_Conditions.pdf', url: '#' }
+        // Get attachments from PR data (default to 2 standard PDFs if not specified)
+        const defaultAttachments = [
+            { name: 'RFQ_Template.pdf', url: AttachmentUtils.getAttachmentUrl('RFQ_Template.pdf') },
+            { name: 'Terms_Conditions.pdf', url: AttachmentUtils.getAttachmentUrl('Terms_Conditions.pdf') }
         ];
+        
+        // Use PR attachments if available, otherwise use defaults
+        let attachments = [];
+        if (pr.attachments && Array.isArray(pr.attachments) && pr.attachments.length > 0) {
+            // If PR has attachments, convert them to proper format
+            attachments = pr.attachments.map(att => {
+                if (typeof att === 'string') {
+                    // If it's just a filename, get the URL
+                    return {
+                        name: att,
+                        url: AttachmentUtils.getAttachmentUrl(att)
+                    };
+                } else if (att.name && att.url) {
+                    // If it already has name and url, use them (but ensure URL is proper)
+                    return {
+                        name: att.name,
+                        url: att.url.startsWith('http') ? att.url : AttachmentUtils.getAttachmentUrl(att.name)
+                    };
+                } else {
+                    // Fallback
+                    return {
+                        name: att.name || att,
+                        url: AttachmentUtils.getAttachmentUrl(att.name || att)
+                    };
+                }
+            });
+        } else {
+            // Use default attachments
+            attachments = defaultAttachments;
+        }
         
         const item = Helpers.createElement('div', {
             className: 'list-item',
@@ -4329,30 +4359,48 @@ function updatePRDetailsInModal() {
 }
 
 /**
- * Open an attachment - opens in new tab/window
+ * Open an attachment - opens PDF in a new browser tab
  */
 function openAttachment(url, name) {
-    if (!url || url === '#') {
-        console.warn('No attachment URL provided');
-        Helpers.showError('Attachment URL not available');
+    if (!url || url === '#' || url === '') {
+        console.warn('No attachment URL provided for:', name);
+        Helpers.showError(`Attachment URL not available for ${name}`);
         return;
     }
     
     try {
-        // If it's a full URL, open directly
+        let finalUrl = url;
+        
+        // If it's already a full URL (http/https), use it directly
         if (url.startsWith('http://') || url.startsWith('https://')) {
-            window.open(url, '_blank');
+            finalUrl = url;
+        } else if (url.startsWith('/')) {
+            // If it's a root-relative path, make it absolute
+            finalUrl = window.location.origin + url;
+        } else if (url.startsWith('./') || url.startsWith('../')) {
+            // If it's a relative path, resolve it relative to current location
+            const base = window.location.origin + window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/'));
+            finalUrl = new URL(url, base + '/').href;
         } else {
-            // If it's a relative path or file path, try to construct full URL
-            // This might need adjustment based on your backend API
-            console.log(`Opening attachment: ${name} from ${url}`);
-            // For now, try opening as-is or construct from API base URL
-            const fullUrl = url.startsWith('/') ? url : `/${url}`;
-            window.open(fullUrl, '_blank');
+            // Assume it's a filename and try to get URL from AttachmentUtils
+            finalUrl = AttachmentUtils.getAttachmentUrl(url);
+        }
+        
+        console.log(`Opening attachment: ${name} from ${finalUrl}`);
+        
+        // Open in new tab/window
+        const newWindow = window.open(finalUrl, '_blank', 'noopener,noreferrer');
+        
+        if (!newWindow) {
+            // Popup blocker might have blocked it
+            Helpers.showError('Popup blocked. Please allow popups for this site to view attachments.');
+            console.error('Failed to open window - popup blocker?');
+        } else {
+            console.log(`✓ Successfully opened attachment: ${name}`);
         }
     } catch (error) {
         console.error('Error opening attachment:', error);
-        Helpers.showError(`Failed to open attachment: ${name}`);
+        Helpers.showError(`Failed to open attachment: ${name}. ${error.message}`);
     }
 }
 
