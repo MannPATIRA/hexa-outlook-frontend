@@ -23,6 +23,61 @@ button, input, textarea, select {
     line-height: inherit;
 }
 
+/* Typography System */
+:root {
+    --typography-heading-lg-size: 18px;
+    --typography-heading-lg-weight: 600;
+    --typography-heading-lg-line-height: 24px;
+    
+    --typography-heading-md-size: 16px;
+    --typography-heading-md-weight: 600;
+    --typography-heading-md-line-height: 22px;
+    
+    --typography-body-size: 14px;
+    --typography-body-weight: 400;
+    --typography-body-line-height: 20px;
+    
+    --typography-label-size: 12px;
+    --typography-label-weight: 500;
+    --typography-label-line-height: 16px;
+    --typography-label-color: #605e5c;
+    
+    --typography-muted-size: 13px;
+    --typography-muted-weight: 400;
+    --typography-muted-color: #605e5c;
+}
+
+.typography-heading-lg {
+    font-size: var(--typography-heading-lg-size);
+    font-weight: var(--typography-heading-lg-weight);
+    line-height: var(--typography-heading-lg-line-height);
+}
+
+.typography-heading-md {
+    font-size: var(--typography-heading-md-size);
+    font-weight: var(--typography-heading-md-weight);
+    line-height: var(--typography-heading-md-line-height);
+}
+
+.typography-body {
+    font-size: var(--typography-body-size);
+    font-weight: var(--typography-body-weight);
+    line-height: var(--typography-body-line-height);
+}
+
+.typography-label {
+    font-size: var(--typography-label-size);
+    font-weight: var(--typography-label-weight);
+    line-height: var(--typography-label-line-height);
+    color: var(--typography-label-color);
+}
+
+.typography-muted {
+    font-size: var(--typography-muted-size);
+    font-weight: var(--typography-muted-weight);
+    color: var(--typography-muted-color);
+}
+
 #app-container {
     display: flex;
     flex-direction: column;
@@ -1006,14 +1061,14 @@ main {
 }
 
 /* Unit Price - primary visual signal */
-.quote-field:nth-child(2) .price-value {
+#quote-mode .quote-field:nth-child(2) .price-value {
     font-size: 22px;
     font-weight: 600;
     color: #0d3d61;
 }
 
 /* Total Price - secondary */
-.quote-field:nth-child(3) .price-value {
+#quote-mode .quote-field:nth-child(3) .price-value {
     font-size: 18px;
     font-weight: 600;
     color: #323130;
@@ -1065,6 +1120,64 @@ main {
 
 #quote-mode .parsed-quote-section h3 {
     margin-bottom: 12px;
+}
+
+/* Typography system for Quote Details page */
+#quote-mode .mode-header h2 {
+    font-size: var(--typography-heading-lg-size);
+    font-weight: var(--typography-heading-lg-weight);
+    line-height: var(--typography-heading-lg-line-height);
+}
+
+#quote-mode .parsed-quote-section h3 {
+    font-size: var(--typography-heading-md-size);
+    font-weight: var(--typography-heading-md-weight);
+    line-height: var(--typography-heading-md-line-height);
+}
+
+#quote-mode .email-info-box .email-subject {
+    font-size: var(--typography-heading-md-size);
+    font-weight: var(--typography-heading-md-weight);
+    line-height: var(--typography-heading-md-line-height);
+}
+
+#quote-mode .quote-field label {
+    font-size: var(--typography-label-size);
+    font-weight: var(--typography-label-weight);
+    line-height: var(--typography-label-line-height);
+    color: var(--typography-label-color);
+}
+
+#quote-mode .quote-field span {
+    font-size: var(--typography-body-size);
+    font-weight: var(--typography-body-weight);
+    line-height: var(--typography-body-line-height);
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+}
+
+#quote-mode .quote-field:first-child span {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+}
+
+#quote-mode .email-info-box .email-from,
+#quote-mode .email-info-box .email-date,
+#quote-mode .loading-text,
+#quote-mode .loading-indicator {
+    font-size: var(--typography-muted-size);
+    font-weight: var(--typography-muted-weight);
+    color: var(--typography-muted-color);
+}
+
+#quote-mode .original-rfq-info {
+    font-size: var(--typography-muted-size);
+    font-weight: var(--typography-muted-weight);
+    color: var(--typography-muted-color);
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid #ddd;
 }
 
 #quote-mode .quote-data-grid {

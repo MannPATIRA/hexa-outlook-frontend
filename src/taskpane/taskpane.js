@@ -1821,7 +1821,7 @@ async function showClarificationMode(context) {
             // If we have the original RFQ context, show it
             if (originalRfq) {
                 html += `
-                    <div class="original-rfq-info" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #ddd; font-size: 12px; color: #666;">
+                    <div class="original-rfq-info" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #ddd;">
                         <div><strong>In reply to your RFQ:</strong></div>
                         <div>${Helpers.escapeHtml(originalRfq.subject || 'Unknown subject')}</div>
                     </div>
@@ -2065,7 +2065,7 @@ async function showQuoteMode(context) {
             // If we have the original RFQ context, show it
             if (originalRfq) {
                 html += `
-                    <div class="original-rfq-info" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #ddd; font-size: 12px; color: #666;">
+                    <div class="original-rfq-info" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #ddd;">
                         <div><strong>In reply to your RFQ:</strong></div>
                         <div>${Helpers.escapeHtml(originalRfq.subject || 'Unknown subject')}</div>
                     </div>
