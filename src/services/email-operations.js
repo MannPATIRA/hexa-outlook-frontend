@@ -951,13 +951,17 @@ const EmailOperations = {
             }
             
             // Verify attachments were added by fetching the draft
+            let verifiedAttachmentCount = 0;
+            let stepFilesInDraft = [];
+            let verificationError = null;
+            
             try {
                 const verifyDraft = await AuthService.graphRequest(`/me/messages/${draft.id}?$expand=attachments&$select=id,subject,attachments`);
-                const attachmentCount = verifyDraft.attachments ? verifyDraft.attachments.length : 0;
-                console.log(`✓ Draft ${draft.id} now has ${attachmentCount} attachment(s)`);
+                verifiedAttachmentCount = verifyDraft.attachments ? verifyDraft.attachments.length : 0;
+                console.log(`✓ Draft ${draft.id} now has ${verifiedAttachmentCount} attachment(s)`);
                 
                 // Check for STEP files in verified draft
-                const stepFilesInDraft = (verifyDraft.attachments || []).filter(a => {
+                stepFilesInDraft = (verifyDraft.attachments || []).filter(a => {
                     const ext = (a.name || '').split('.').pop().toLowerCase();
                     return ext === 'step' || ext === 'stp';
                 });
@@ -974,21 +978,52 @@ const EmailOperations = {
                 }
                 
                 // #region agent log
-                fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'email-operations.js:844',message:'Attachment verification result',data:{draftId:draft.id,expectedCount:options.attachments.length,actualCount:attachmentCount,stepFilesExpected:stepFilesToUpload.length,stepFilesFound:stepFilesInDraft.length,attachments:verifyDraft.attachments?.map(a=>({name:a.name,size:a.size}))},timestamp:Date.now(),sessionId:'debug-session',runId:'run3',hypothesisId:'F'})}).catch(()=>{});
+                fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'email-operations.js:844',message:'Attachment verification result',data:{draftId:draft.id,expectedCount:options.attachments.length,actualCount:verifiedAttachmentCount,stepFilesExpected:stepFilesToUpload.length,stepFilesFound:stepFilesInDraft.length,attachments:verifyDraft.attachments?.map(a=>({name:a.name,size:a.size}))},timestamp:Date.now(),sessionId:'debug-session',runId:'run3',hypothesisId:'F'})}).catch(()=>{});
                 // #endregion
                 
-                if (attachmentCount === 0) {
+                if (verifiedAttachmentCount === 0) {
                     console.warn('⚠ WARNING: Draft was created but no attachments were found. This may indicate an upload failure.');
                 }
             } catch (verifyError) {
+                verificationError = verifyError;
                 // #region agent log
                 fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'email-operations.js:850',message:'Attachment verification failed',data:{draftId:draft.id,errorMessage:verifyError.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run3',hypothesisId:'F'})}).catch(()=>{});
                 // #endregion
                 console.warn('Could not verify attachments:', verifyError);
             }
+            
+            // Return draft with upload status
+            return {
+                draft: draft,
+                uploadStatus: {
+                    totalAttachments: options.attachments.length,
+                    successfulUploads: successfulUploads,
+                    failedUploads: failedUploads,
+                    stepFilesToUpload: stepFilesToUpload.length,
+                    stepFilesUploaded: stepFilesUploaded,
+                    stepFilesFailed: stepFilesFailed,
+                    verifiedAttachmentCount: verifiedAttachmentCount,
+                    stepFilesInDraft: stepFilesInDraft.map(a => a.name),
+                    verificationError: verificationError ? verificationError.message : null
+                }
+            };
         }
 
-        return draft;
+        // No attachments - return draft with minimal status
+        return {
+            draft: draft,
+            uploadStatus: {
+                totalAttachments: 0,
+                successfulUploads: 0,
+                failedUploads: 0,
+                stepFilesToUpload: 0,
+                stepFilesUploaded: 0,
+                stepFilesFailed: 0,
+                verifiedAttachmentCount: 0,
+                stepFilesInDraft: [],
+                verificationError: null
+            }
+        };
     },
 
     /**

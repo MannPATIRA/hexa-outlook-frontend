@@ -336,10 +336,11 @@ const AttachmentUtils = {
      * Prepare attachments from API response filenames
      * @param {Array<string>} filenames - Array of filenames from API
      * @param {string} rfqId - Optional RFQ ID for file fetching
-     * @returns {Promise<Array>} Array of Graph API attachment objects
+     * @returns {Promise<Object>} Object with {attachments: Array, errors: Array}
      */
     async prepareAttachmentsFromApi(filenames, rfqId = null) {
         const attachments = [];
+        const errors = [];
         const stepFilesProcessed = [];
         const stepFilesFailed = [];
         
@@ -398,6 +399,16 @@ const AttachmentUtils = {
                     console.log(`✓ Prepared attachment from API: ${filename}`);
                 }
             } catch (error) {
+                // Record error details
+                const errorInfo = {
+                    filename: filename,
+                    isStepFile: isStep,
+                    errorType: error.name || 'Unknown',
+                    errorMessage: error.message || 'Unknown error',
+                    errorStack: error.stack ? error.stack.substring(0, 500) : null
+                };
+                errors.push(errorInfo);
+                
                 if (isStep) {
                     stepFilesFailed.push({ filename, error: error.message });
                     console.error(`✗ [STEP FILE] CRITICAL: Failed to prepare STEP file ${filename}:`, error);
@@ -447,6 +458,12 @@ const AttachmentUtils = {
         // Log summary
         this.logAttachmentSummary(attachments, 'after API fetch');
         
-        return attachments;
+        // Return both attachments and errors for UI feedback
+        return {
+            attachments: attachments,
+            errors: errors,
+            stepFilesProcessed: stepFilesProcessed,
+            stepFilesFailed: stepFilesFailed.map(f => f.filename)
+        };
     }
 };

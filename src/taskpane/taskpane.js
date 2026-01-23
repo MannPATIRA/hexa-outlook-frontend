@@ -5006,10 +5006,19 @@ async function handleGenerateRFQs() {
                     console.log(`📄 Non-STEP files: ${nonStepFiles.length} file(s)`, nonStepFiles);
                     
                     // Fetch and prepare attachments from backend
-                    const apiAttachments = await AttachmentUtils.prepareAttachmentsFromApi(
+                    const apiResult = await AttachmentUtils.prepareAttachmentsFromApi(
                         attachmentArray,
                         AppState.selectedPR?.pr_id
                     );
+                    const apiAttachments = apiResult.attachments || [];
+                    const apiErrors = apiResult.errors || [];
+                    
+                    // Check for STEP file failures and show UI warning
+                    const stepFileErrors = apiErrors.filter(e => e.isStepFile);
+                    if (stepFileErrors.length > 0) {
+                        const failedStepFiles = stepFileErrors.map(e => e.filename).join(', ');
+                        Helpers.showError(`Warning: ${stepFileErrors.length} STEP file(s) could not be attached: ${failedStepFiles}`);
+                    }
                     
                     // Combine API files with defaults if some files were fetched successfully
                     if (apiAttachments.length > 0 && apiAttachments.length < attachmentArray.length) {
@@ -5068,9 +5077,16 @@ async function handleGenerateRFQs() {
                         if (stepFilesInFinal.length === stepFiles.length) {
                             console.log(`✓ All ${stepFiles.length} STEP file(s) are included in final attachments`);
                         } else {
+                            const missingCount = stepFiles.length - stepFilesInFinal.length;
+                            const missingFiles = stepFiles.filter(f => !stepFilesInFinal.some(a => a.name === f));
                             console.warn(`⚠️ STEP file mismatch: Expected ${stepFiles.length}, found ${stepFilesInFinal.length} in final attachments`);
                             console.warn(`  Expected STEP files:`, stepFiles);
                             console.warn(`  Found STEP files:`, stepFilesInFinal.map(a => a.name));
+                            
+                            // Show UI warning
+                            if (missingFiles.length > 0) {
+                                Helpers.showError(`Warning: ${missingCount} STEP file(s) are missing from attachments: ${missingFiles.join(', ')}`);
+                            }
                         }
                     }
                 } else {
@@ -5125,6 +5141,9 @@ async function handleGenerateRFQs() {
             
             let successCount = 0;
             let failCount = 0;
+            let totalPdfsAttached = 0;
+            let totalStepFilesAttached = 0;
+            let totalStepFilesFailed = 0;
             
             for (const rfq of rfqs) {
                 try {
@@ -5147,10 +5166,19 @@ async function handleGenerateRFQs() {
                     if (rfq.attachments && Array.isArray(rfq.attachments) && rfq.attachments.length > 0) {
                         // Fetch attachments specific to this RFQ
                         try {
-                            const rfqApiAttachments = await AttachmentUtils.prepareAttachmentsFromApi(
+                            const rfqApiResult = await AttachmentUtils.prepareAttachmentsFromApi(
                                 rfq.attachments,
                                 rfq.rfq_id  // Use RFQ ID for context
                             );
+                            const rfqApiAttachments = rfqApiResult.attachments || [];
+                            const rfqApiErrors = rfqApiResult.errors || [];
+                            
+                            // Check for STEP file failures for this RFQ
+                            const rfqStepFileErrors = rfqApiErrors.filter(e => e.isStepFile);
+                            if (rfqStepFileErrors.length > 0) {
+                                const failedStepFiles = rfqStepFileErrors.map(e => e.filename).join(', ');
+                                console.warn(`[${rfq.rfq_id}] STEP file failures: ${failedStepFiles}`);
+                            }
                             
                             // Combine RFQ-specific files with defaults if some succeeded
                             if (rfqApiAttachments.length > 0 && rfqApiAttachments.length < rfq.attachments.length) {
@@ -5249,6 +5277,8 @@ async function handleGenerateRFQs() {
                         if (expectedStepFiles.length > 0) {
                             console.warn(`  ⚠️ WARNING: Expected ${expectedStepFiles.length} STEP file(s) but none found in final attachment array!`);
                             console.warn(`  Expected STEP files:`, expectedStepFiles);
+                            // Show UI warning
+                            Helpers.showError(`Warning: STEP file(s) for ${rfq.supplier_name} could not be attached: ${expectedStepFiles.join(', ')}`);
                         }
                     }
                     
@@ -5262,7 +5292,7 @@ async function handleGenerateRFQs() {
                     // #endregion
                     
                     // Save draft with attachments
-                    const draft = await EmailOperations.saveDraft({
+                    const result = await EmailOperations.saveDraft({
                         to: [rfq.supplier_email],
                         subject: rfq.subject || '',
                         body: htmlBody,
@@ -5270,8 +5300,41 @@ async function handleGenerateRFQs() {
                         attachments: rfqAttachments  // Use RFQ-specific attachments
                     });
                     
+                    // Handle new return format (with uploadStatus) or legacy format (just draft)
+                    const draft = result.draft || result;
+                    const uploadStatus = result.uploadStatus;
+                    
                     // Store draft ID in RFQ object
                     rfq.draftId = draft.id;
+                    
+                    // Track attachment statistics
+                    if (uploadStatus) {
+                        // Count PDFs (total attachments - STEP files)
+                        const pdfsInDraft = uploadStatus.verifiedAttachmentCount - uploadStatus.stepFilesInDraft.length;
+                        totalPdfsAttached += pdfsInDraft;
+                        totalStepFilesAttached += uploadStatus.stepFilesInDraft.length;
+                        totalStepFilesFailed += uploadStatus.stepFilesFailed;
+                        
+                        // Check for STEP file issues and show UI warning
+                        if (uploadStatus.stepFilesToUpload > 0) {
+                            if (uploadStatus.stepFilesFailed > 0) {
+                                Helpers.showError(`Warning: ${uploadStatus.stepFilesFailed} STEP file(s) failed to upload for ${rfq.supplier_name}`);
+                            } else if (uploadStatus.stepFilesInDraft.length < uploadStatus.stepFilesToUpload) {
+                                const missing = uploadStatus.stepFilesToUpload - uploadStatus.stepFilesInDraft.length;
+                                Helpers.showError(`Warning: ${missing} STEP file(s) are missing from draft for ${rfq.supplier_name}. Upload may have failed.`);
+                            }
+                        }
+                    } else {
+                        // Fallback: count from rfqAttachments if uploadStatus not available
+                        const pdfs = rfqAttachments.filter(a => (a.name || '').toLowerCase().endsWith('.pdf')).length;
+                        const steps = rfqAttachments.filter(a => {
+                            const ext = (a.name || '').split('.').pop().toLowerCase();
+                            return ext === 'step' || ext === 'stp';
+                        }).length;
+                        totalPdfsAttached += pdfs;
+                        totalStepFilesAttached += steps;
+                    }
+                    
                     successCount++;
                     console.log(`✓ Draft created for ${rfq.supplier_name} (ID: ${draft.id})`);
                 } catch (error) {
@@ -5283,6 +5346,25 @@ async function handleGenerateRFQs() {
             }
             
             console.log(`Draft creation complete: ${successCount} succeeded, ${failCount} failed`);
+            
+            // Show enhanced success message with attachment summary
+            if (successCount > 0) {
+                let successMessage = `${successCount} draft(s) created successfully`;
+                const attachmentParts = [];
+                if (totalPdfsAttached > 0) {
+                    attachmentParts.push(`${totalPdfsAttached} PDF${totalPdfsAttached > 1 ? 's' : ''}`);
+                }
+                if (totalStepFilesAttached > 0) {
+                    attachmentParts.push(`${totalStepFilesAttached} STEP file${totalStepFilesAttached > 1 ? 's' : ''}`);
+                }
+                if (attachmentParts.length > 0) {
+                    successMessage += ` with ${attachmentParts.join(' and ')} attached`;
+                }
+                if (totalStepFilesFailed > 0) {
+                    successMessage += ` (${totalStepFilesFailed} STEP file${totalStepFilesFailed > 1 ? 's' : ''} failed)`;
+                }
+                Helpers.showSuccess(successMessage);
+            }
         }
         
         AppState.rfqs = rfqs;
@@ -5361,7 +5443,48 @@ function renderRFQCards(rfqs) {
                     </div>
                 ` : ''}
                 
-                <p><strong>Total Attachments:</strong> ${rfq.attachments?.length || 0} file(s)</p>
+                ${(() => {
+                    // Calculate attachment counts
+                    const allAttachments = rfq.attachments || [];
+                    const pdfFiles = allAttachments.filter(f => f.toLowerCase().endsWith('.pdf'));
+                    const stepFiles = allAttachments.filter(f => {
+                        const ext = f.split('.').pop().toLowerCase();
+                        return ext === 'step' || ext === 'stp';
+                    });
+                    const otherFiles = allAttachments.filter(f => {
+                        const ext = f.split('.').pop().toLowerCase();
+                        return ext !== 'pdf' && ext !== 'step' && ext !== 'stp';
+                    });
+                    
+                    // Check if STEP files are missing (expected but not in attachments)
+                    const expectedStepFiles = rfq.body?.step_files || [];
+                    const missingStepFiles = expectedStepFiles.filter(f => !allAttachments.includes(f));
+                    const hasStepFileIssues = missingStepFiles.length > 0;
+                    
+                    let statusHtml = `<p><strong>Attachment Status:</strong> `;
+                    const parts = [];
+                    if (pdfFiles.length > 0) parts.push(`${pdfFiles.length} PDF${pdfFiles.length > 1 ? 's' : ''}`);
+                    if (stepFiles.length > 0) parts.push(`${stepFiles.length} STEP file${stepFiles.length > 1 ? 's' : ''}`);
+                    if (otherFiles.length > 0) parts.push(`${otherFiles.length} other file${otherFiles.length > 1 ? 's' : ''}`);
+                    
+                    if (parts.length === 0) {
+                        statusHtml += 'No attachments';
+                    } else {
+                        statusHtml += parts.join(', ');
+                    }
+                    
+                    if (hasStepFileIssues) {
+                        statusHtml += ` <span style="color: #d13438; font-weight: 600;">⚠️ (${missingStepFiles.length} STEP file${missingStepFiles.length > 1 ? 's' : ''} missing)</span>`;
+                    }
+                    
+                    statusHtml += `</p>`;
+                    
+                    if (hasStepFileIssues) {
+                        statusHtml += `<p style="color: #d13438; font-size: 12px; margin-top: 4px;"><strong>Missing STEP files:</strong> ${missingStepFiles.map(f => Helpers.escapeHtml(f)).join(', ')}</p>`;
+                    }
+                    
+                    return statusHtml;
+                })()}
             </div>
             <div class="rfq-card-actions">
                 <button class="ms-Button ms-Button--small" onclick="previewRFQ(${index})">
