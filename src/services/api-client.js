@@ -215,7 +215,7 @@ const ApiClient = {
      * @param {number} options.quantity - Quantity for quote calculations (default: 100)
      */
     async scheduleAutoReply(options) {
-        return this.post('/demo/schedule-reply', {
+        const payload = {
             to_email: options.toEmail,
             original_subject: options.subject,
             original_message_id: options.internetMessageId,
@@ -223,7 +223,17 @@ const ApiClient = {
             reply_type: options.replyType || 'random',
             delay_seconds: options.delaySeconds || 30,
             quantity: options.quantity || 100
-        });
+        };
+        
+        // Add supplier info if provided
+        if (options.supplierId) {
+            payload.supplier_id = options.supplierId;
+        }
+        if (options.supplierName) {
+            payload.supplier_name = options.supplierName;
+        }
+        
+        return this.post('/demo/schedule-reply', payload);
     },
 
     // ==================== FILE ENDPOINTS ====================

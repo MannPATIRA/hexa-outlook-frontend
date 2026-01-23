@@ -1,4 +1,16 @@
 /**
+ * Get RFQ mapping from email (uses global RFQMapping if available)
+ * @param {Object} email - Email object with inReplyTo/references
+ * @returns {Object|null} Mapping object or null if not found
+ */
+function getRFQMappingFromEmail(email) {
+    if (typeof window !== 'undefined' && window.RFQMapping) {
+        return window.RFQMapping.getFromEmail(email);
+    }
+    return null;
+}
+
+/**
  * Email Monitoring Service
  * Automatically monitors for replies to emails in Sent RFQs folder
  * Classifies and organizes them automatically
@@ -512,29 +524,50 @@ const EmailMonitor = {
             // Step 3: Classify the email
             this.log('Step 3: Calling classification API...');
             
-            // Get supplier info from the email sender
-            const senderEmail = fullEmail.from?.emailAddress?.address || '';
-            // Use sender email as supplier_id (backend requires this field)
-            // In a production system, you'd look up the actual supplier ID from a database
-            const supplierId = senderEmail || 'unknown';
+            // Get supplier info from RFQ mapping
+            let rfqIdFromMapping = null;
+            let supplierId = null;
+            let supplierName = null;
             
+            // Try to get mapping from email's inReplyTo or references
+            const rfqMapping = getRFQMappingFromEmail(fullEmail);
+            if (rfqMapping) {
+                rfqIdFromMapping = rfqMapping.rfq_id;
+                supplierId = rfqMapping.supplier_id;
+                supplierName = rfqMapping.supplier_name;
+                this.log(`  Found RFQ mapping: RFQ ${rfqIdFromMapping}, Supplier ${supplierName} (${supplierId})`);
+            } else {
+                // Fallback: Extract RFQ ID from subject
+                rfqIdFromMapping = rfqId || EmailOperations.extractRfqId(fullEmail.subject);
+                this.log(`  No RFQ mapping found, extracted RFQ ID from subject: ${rfqIdFromMapping || 'none'}`);
+                
+                // Fallback: Use sender email as supplier_id
+                const senderEmail = fullEmail.from?.emailAddress?.address || '';
+                supplierId = senderEmail || 'unknown';
+                this.log(`  Using sender email as supplier_id: ${supplierId}`);
+            }
+            
+            // Use rfqId from mapping if available, otherwise use extracted one
+            const finalRfqId = rfqIdFromMapping || rfqId;
+            
+            const senderEmail = fullEmail.from?.emailAddress?.address || '';
             const classificationPayload = {
                 subject: fullEmail.subject || '',
                 body: emailBody,
                 from_email: senderEmail,
                 date: fullEmail.receivedDateTime || new Date().toISOString(),
-                in_reply_to: rfqId
+                in_reply_to: finalRfqId
             };
             this.log(`  Classification request:`, JSON.stringify(classificationPayload, null, 2).substring(0, 500));
-            this.log(`  Supplier ID: ${supplierId}`);
+            this.log(`  Supplier ID: ${supplierId}, Supplier Name: ${supplierName || 'N/A'}`);
             
             let classification;
             try {
                 classification = await ApiClient.classifyEmail(
                     emailChain,
                     classificationPayload,
-                    rfqId,
-                    supplierId  // Add required supplier_id parameter
+                    finalRfqId,
+                    supplierId  // Use supplier_id from mapping
                 );
                 this.logSuccess(`Classification result: ${classification.classification} (confidence: ${classification.confidence})`);
                 

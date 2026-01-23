@@ -47,6 +47,141 @@ function persistState(state) {
     }
 }
 
+// ==================== RFQ MAPPING SYSTEM ====================
+// RFQ → Supplier mapping storage
+// Map: internetMessageId → {rfq_id, supplier_id, supplier_name, supplier_email, message_id, sentDateTime}
+let rfqMappings = new Map();
+
+/**
+ * Save RFQ mappings to localStorage
+ */
+function saveRFQMappings() {
+    try {
+        const mappingsArray = Array.from(rfqMappings.entries());
+        localStorage.setItem('procurement_rfq_mappings', JSON.stringify(mappingsArray));
+        console.log(`Saved ${mappingsArray.length} RFQ mappings to localStorage`);
+    } catch (error) {
+        console.error('Error saving RFQ mappings:', error);
+    }
+}
+
+/**
+ * Load RFQ mappings from localStorage
+ */
+function loadRFQMappings() {
+    try {
+        const stored = localStorage.getItem('procurement_rfq_mappings');
+        if (stored) {
+            const mappingsArray = JSON.parse(stored);
+            rfqMappings = new Map(mappingsArray);
+            console.log(`Loaded ${rfqMappings.size} RFQ mappings from localStorage`);
+        }
+    } catch (error) {
+        console.error('Error loading RFQ mappings:', error);
+        rfqMappings = new Map(); // Reset on error
+    }
+}
+
+/**
+ * Store RFQ mapping when sending email
+ * @param {string} internetMessageId - Internet Message ID of sent email
+ * @param {Object} rfqInfo - RFQ information {rfq_id, supplier_id, supplier_name, supplier_email}
+ * @param {string} sentDateTime - ISO timestamp when email was sent
+ */
+function storeRFQMapping(internetMessageId, rfqInfo, sentDateTime = null) {
+    if (!internetMessageId) {
+        console.warn('Cannot store RFQ mapping: internetMessageId is missing');
+        return;
+    }
+    
+    const mapping = {
+        rfq_id: rfqInfo.rfq_id,
+        supplier_id: rfqInfo.supplier_id,
+        supplier_name: rfqInfo.supplier_name,
+        supplier_email: rfqInfo.supplier_email,
+        message_id: internetMessageId,
+        sentDateTime: sentDateTime || new Date().toISOString()
+    };
+    
+    rfqMappings.set(internetMessageId, mapping);
+    saveRFQMappings();
+    console.log(`Stored RFQ mapping: ${internetMessageId} → ${rfqInfo.supplier_name} (${rfqInfo.supplier_id})`);
+}
+
+/**
+ * Get RFQ mapping by internet message ID
+ * @param {string} internetMessageId - Internet Message ID to look up
+ * @returns {Object|null} Mapping object or null if not found
+ */
+function getRFQMapping(internetMessageId) {
+    if (!internetMessageId) return null;
+    return rfqMappings.get(internetMessageId) || null;
+}
+
+/**
+ * Get RFQ mapping from email's inReplyTo or references
+ * @param {Object} email - Email object with inReplyTo/references
+ * @returns {Object|null} Mapping object or null if not found
+ */
+function getRFQMappingFromEmail(email) {
+    // Try inReplyTo first (most reliable)
+    if (email.inReplyTo) {
+        const mapping = getRFQMapping(email.inReplyTo);
+        if (mapping) return mapping;
+    }
+    
+    // Try references (array of message IDs in thread)
+    if (email.references && Array.isArray(email.references)) {
+        for (const ref of email.references) {
+            const mapping = getRFQMapping(ref);
+            if (mapping) return mapping;
+        }
+    }
+    
+    // Try references as string (space-separated)
+    if (email.references && typeof email.references === 'string') {
+        const refs = email.references.split(/\s+/);
+        for (const ref of refs) {
+            const mapping = getRFQMapping(ref);
+            if (mapping) return mapping;
+        }
+    }
+    
+    return null;
+}
+
+/**
+ * Clean up old RFQ mappings (older than 30 days)
+ */
+function cleanupOldRFQMappings() {
+    const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
+    let removedCount = 0;
+    
+    for (const [messageId, mapping] of rfqMappings.entries()) {
+        if (mapping.sentDateTime) {
+            const sentTime = new Date(mapping.sentDateTime).getTime();
+            if (sentTime < thirtyDaysAgo) {
+                rfqMappings.delete(messageId);
+                removedCount++;
+            }
+        }
+    }
+    
+    if (removedCount > 0) {
+        saveRFQMappings();
+        console.log(`Cleaned up ${removedCount} old RFQ mappings`);
+    }
+}
+
+// Make mapping functions accessible to email-monitor.js
+if (typeof window !== 'undefined') {
+    window.RFQMapping = {
+        get: getRFQMapping,
+        getFromEmail: getRFQMappingFromEmail,
+        store: storeRFQMapping
+    };
+}
+
 function getPersistedState() {
     try {
         const stored = localStorage.getItem(STATE_KEY);
@@ -3277,6 +3412,37 @@ async function sendDraftEmailWithFullWorkflow(draft) {
     
     console.log(`Sent email ID: ${fullSentEmail.id}, conversationId: ${conversationId}, internetMessageId: ${internetMessageId}, sentDateTime: ${sentDateTime}`);
     
+    // Store RFQ mapping if we can find the corresponding RFQ
+    if (internetMessageId) {
+        try {
+            // Find RFQ from AppState.rfqs by matching subject and recipient
+            const matchingRfq = AppState.rfqs?.find(rfq => {
+                const subjectMatch = rfq.subject === subject;
+                const recipientMatch = rfq.supplier_email?.toLowerCase() === recipient.toLowerCase();
+                return subjectMatch && recipientMatch;
+            });
+            
+            if (matchingRfq && matchingRfq.rfq_id && matchingRfq.supplier_id) {
+                storeRFQMapping(internetMessageId, {
+                    rfq_id: matchingRfq.rfq_id,
+                    supplier_id: matchingRfq.supplier_id,
+                    supplier_name: matchingRfq.supplier_name,
+                    supplier_email: matchingRfq.supplier_email || recipient
+                }, sentDateTime);
+            } else {
+                console.warn(`Could not find RFQ match for sent email: ${subject} to ${recipient}`);
+                console.warn('Available RFQs:', AppState.rfqs?.map(r => ({ 
+                    subject: r.subject, 
+                    supplier_email: r.supplier_email,
+                    rfq_id: r.rfq_id 
+                })));
+            }
+        } catch (mappingError) {
+            console.error('Error storing RFQ mapping:', mappingError);
+            // Continue - mapping failure shouldn't block email sending
+        }
+    }
+    
     // Step 3: Move to correct folder if we have material code
     if (materialCode && fullSentEmail) {
         try {
@@ -3311,11 +3477,14 @@ async function sendDraftEmailWithFullWorkflow(draft) {
         try {
             const userEmail = Office.context.mailbox.userProfile?.emailAddress;
             if (userEmail) {
+                // Get RFQ mapping to include supplier info
+                const rfqMapping = getRFQMapping(internetMessageId);
+                
                 const quantityMatch = subject.match(/(\d+)\s*pcs/i);
                 const quantity = quantityMatch ? parseInt(quantityMatch[1]) : 100;
                 
                 console.log(`Scheduling auto-reply to ${userEmail}...`);
-                await ApiClient.scheduleAutoReply({
+                const autoReplyOptions = {
                     toEmail: userEmail,
                     subject: subject,
                     internetMessageId: internetMessageId,
@@ -3323,7 +3492,18 @@ async function sendDraftEmailWithFullWorkflow(draft) {
                     replyType: 'random',
                     delaySeconds: 5,
                     quantity: quantity
-                });
+                };
+                
+                // Add supplier info if mapping exists
+                if (rfqMapping) {
+                    autoReplyOptions.supplierId = rfqMapping.supplier_id;
+                    autoReplyOptions.supplierName = rfqMapping.supplier_name;
+                    console.log(`  Including supplier info: ${rfqMapping.supplier_name} (${rfqMapping.supplier_id})`);
+                } else {
+                    console.warn(`  No RFQ mapping found for ${internetMessageId} - supplier info will be missing`);
+                }
+                
+                await ApiClient.scheduleAutoReply(autoReplyOptions);
                 
                 console.log(`✓ Auto-reply scheduled (will arrive in ~5 seconds)`);
                 autoReplyScheduled = true;
@@ -3762,6 +3942,9 @@ Office.onReady((info) => {
 });
 
 async function initializeApp() {
+    // Load RFQ mappings from localStorage
+    loadRFQMappings();
+    cleanupOldRFQMappings();
     console.log('=== Initializing Procurement Workflow Add-in ===');
     
     try {
