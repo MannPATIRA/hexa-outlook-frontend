@@ -314,6 +314,10 @@ const AttachmentUtils = {
                 fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attachments.js:305',message:'Failed to prepare attachment',data:{filename:filename,errorMessage:error.message,errorName:error.name},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'E'})}).catch(()=>{});
                 // #endregion
                 console.error(`✗ Failed to prepare attachment ${filename}:`, error);
+                console.error(`  Error type: ${error.name}, Message: ${error.message}`);
+                if (error.stack) {
+                    console.error(`  Stack: ${error.stack.substring(0, 200)}...`);
+                }
                 // Continue with other attachments - don't fail entire operation
             }
         }

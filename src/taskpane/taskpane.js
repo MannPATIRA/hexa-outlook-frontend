@@ -4989,14 +4989,30 @@ async function handleGenerateRFQs() {
                     console.log(`Found ${attachmentArray.length} unique attachment(s) from API:`, attachmentArray);
                     
                     // Fetch and prepare attachments from backend
-                    graphApiAttachments = await AttachmentUtils.prepareAttachmentsFromApi(
+                    const apiAttachments = await AttachmentUtils.prepareAttachmentsFromApi(
                         attachmentArray,
                         AppState.selectedPR?.pr_id
                     );
                     
-                    // Check if file fetching failed (empty array returned)
-                    if (graphApiAttachments.length === 0) {
-                        console.warn('No attachments could be fetched from API, using default attachments');
+                    // Combine API files with defaults if some files were fetched successfully
+                    if (apiAttachments.length > 0 && apiAttachments.length < attachmentArray.length) {
+                        // Some files succeeded, some failed - combine with defaults
+                        console.warn(`Only ${apiAttachments.length} out of ${attachmentArray.length} API files could be fetched. Adding default PDFs.`);
+                        try {
+                            const defaultAttachments = await AttachmentUtils.prepareGraphApiAttachments();
+                            // Combine: API files first, then defaults (avoid duplicates)
+                            const apiFilenames = new Set(apiAttachments.map(a => a.name));
+                            const uniqueDefaults = defaultAttachments.filter(a => !apiFilenames.has(a.name));
+                            graphApiAttachments = [...apiAttachments, ...uniqueDefaults];
+                            console.log(`✓ Combined ${apiAttachments.length} API file(s) with ${uniqueDefaults.length} default PDF(s)`);
+                        } catch (defaultError) {
+                            console.error('CRITICAL: Default attachment preparation failed:', defaultError);
+                            // Use whatever API files we got
+                            graphApiAttachments = apiAttachments;
+                        }
+                    } else if (apiAttachments.length === 0) {
+                        // All API files failed - use defaults only
+                        console.warn('No API files could be fetched, using default attachments only');
                         console.warn('This usually means the backend file endpoint /api/files/{filename} is not available or files are not accessible');
                         try {
                             graphApiAttachments = await AttachmentUtils.prepareGraphApiAttachments();
@@ -5008,6 +5024,20 @@ async function handleGenerateRFQs() {
                                 stack: defaultError.stack
                             });
                             graphApiAttachments = [];
+                        }
+                    } else {
+                        // All API files succeeded - combine with defaults to ensure we always have the standard PDFs
+                        console.log(`✓ All ${apiAttachments.length} API file(s) fetched successfully. Adding default PDFs.`);
+                        try {
+                            const defaultAttachments = await AttachmentUtils.prepareGraphApiAttachments();
+                            // Combine: API files first, then defaults (avoid duplicates)
+                            const apiFilenames = new Set(apiAttachments.map(a => a.name));
+                            const uniqueDefaults = defaultAttachments.filter(a => !apiFilenames.has(a.name));
+                            graphApiAttachments = [...apiAttachments, ...uniqueDefaults];
+                            console.log(`✓ Combined ${apiAttachments.length} API file(s) with ${uniqueDefaults.length} default PDF(s)`);
+                        } catch (defaultError) {
+                            console.warn('Default attachment preparation failed, using API files only:', defaultError);
+                            graphApiAttachments = apiAttachments;
                         }
                     }
                 } else {
@@ -5084,10 +5114,43 @@ async function handleGenerateRFQs() {
                     if (rfq.attachments && Array.isArray(rfq.attachments) && rfq.attachments.length > 0) {
                         // Fetch attachments specific to this RFQ
                         try {
-                            rfqAttachments = await AttachmentUtils.prepareAttachmentsFromApi(
+                            const rfqApiAttachments = await AttachmentUtils.prepareAttachmentsFromApi(
                                 rfq.attachments,
                                 rfq.rfq_id  // Use RFQ ID for context
                             );
+                            
+                            // Combine RFQ-specific files with defaults if some succeeded
+                            if (rfqApiAttachments.length > 0 && rfqApiAttachments.length < rfq.attachments.length) {
+                                // Some files succeeded, some failed - combine with defaults
+                                console.warn(`Only ${rfqApiAttachments.length} out of ${rfq.attachments.length} RFQ-specific files could be fetched. Adding default PDFs.`);
+                                try {
+                                    const defaultAttachments = await AttachmentUtils.prepareGraphApiAttachments();
+                                    const apiFilenames = new Set(rfqApiAttachments.map(a => a.name));
+                                    const uniqueDefaults = defaultAttachments.filter(a => !apiFilenames.has(a.name));
+                                    rfqAttachments = [...rfqApiAttachments, ...uniqueDefaults];
+                                    console.log(`✓ Combined ${rfqApiAttachments.length} RFQ-specific file(s) with ${uniqueDefaults.length} default PDF(s)`);
+                                } catch (defaultError) {
+                                    // Use whatever RFQ files we got
+                                    rfqAttachments = rfqApiAttachments;
+                                }
+                            } else if (rfqApiAttachments.length === 0) {
+                                // All RFQ-specific files failed - use shared attachments (which already include defaults)
+                                console.warn(`All RFQ-specific attachments failed for ${rfq.rfq_id}, using shared attachments`);
+                                rfqAttachments = graphApiAttachments;
+                            } else {
+                                // All RFQ-specific files succeeded - combine with defaults
+                                console.log(`✓ All ${rfqApiAttachments.length} RFQ-specific file(s) fetched. Adding default PDFs.`);
+                                try {
+                                    const defaultAttachments = await AttachmentUtils.prepareGraphApiAttachments();
+                                    const apiFilenames = new Set(rfqApiAttachments.map(a => a.name));
+                                    const uniqueDefaults = defaultAttachments.filter(a => !apiFilenames.has(a.name));
+                                    rfqAttachments = [...rfqApiAttachments, ...uniqueDefaults];
+                                    console.log(`✓ Combined ${rfqApiAttachments.length} RFQ-specific file(s) with ${uniqueDefaults.length} default PDF(s)`);
+                                } catch (defaultError) {
+                                    // Use RFQ files only
+                                    rfqAttachments = rfqApiAttachments;
+                                }
+                            }
                         } catch (rfqAttachError) {
                             console.warn(`Failed to fetch RFQ-specific attachments for ${rfq.rfq_id}, using shared:`, rfqAttachError);
                             console.warn('RFQ-specific attachment error:', {
