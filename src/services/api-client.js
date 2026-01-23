@@ -293,10 +293,48 @@ const ApiClient = {
                 if (isStep) {
                     console.error(`🔧 [STEP FILE] CRITICAL: Fetch failed for ${filename}: ${response.status} ${response.statusText}`);
                 }
+                
+                // Try to get error details from response body (clone response first to avoid consuming it)
+                let errorDetails = '';
+                try {
+                    const responseClone = response.clone();
+                    const errorText = await responseClone.text();
+                    if (errorText && errorText.trim().length > 0 && errorText.length < 200) {
+                        errorDetails = ` - ${errorText.trim()}`;
+                    }
+                } catch (e) {
+                    // Ignore errors reading response body - not critical
+                    if (isStep) {
+                        console.warn(`Could not read error response body: ${e.message}`);
+                    }
+                }
+                
                 // #region agent log
-                fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api-client.js:252',message:'File fetch failed',data:{filename:filename,status:response.status,statusText:response.statusText,url:url,isStepFile:isStep},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'E'})}).catch(()=>{});
+                fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api-client.js:252',message:'File fetch failed',data:{filename:filename,status:response.status,statusText:response.statusText,url:url,isStepFile:isStep,errorDetails:errorDetails},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'E'})}).catch(()=>{});
                 // #endregion
-                throw new ApiError(`Failed to fetch file ${filename}: ${response.statusText}`, response.status);
+                
+                // Build comprehensive error message with status code
+                const statusText = response.statusText || 'Unknown error';
+                const statusCode = response.status;
+                let errorMessage = `HTTP ${statusCode}`;
+                if (statusText && statusText !== 'Unknown error') {
+                    errorMessage += ` ${statusText}`;
+                }
+                if (errorDetails) {
+                    errorMessage += errorDetails;
+                } else {
+                    // Provide helpful message based on status code
+                    if (statusCode === 404) {
+                        errorMessage += ' - File not found on server';
+                    } else if (statusCode === 403) {
+                        errorMessage += ' - Access forbidden';
+                    } else if (statusCode === 500) {
+                        errorMessage += ' - Server error';
+                    } else if (statusCode === 0) {
+                        errorMessage += ' - Network/CORS error';
+                    }
+                }
+                throw new ApiError(`Failed to fetch file ${filename}: ${errorMessage}`, statusCode);
             }
             
             const blob = await response.blob();
