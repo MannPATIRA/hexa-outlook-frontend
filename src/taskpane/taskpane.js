@@ -5050,6 +5050,10 @@ async function handleGenerateRFQs() {
                     
                     console.log(`Creating draft for ${rfq.supplier_name} with ${rfqAttachments.length} attachment(s)...`);
                     
+                    // #region agent log
+                    fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'taskpane.js:5051',message:'About to save draft with attachments',data:{supplierName:rfq.supplier_name,attachmentsCount:rfqAttachments.length,attachments:rfqAttachments.map(a=>({name:a.name,hasContentBytes:!!a.contentBytes,contentBytesLength:a.contentBytes?.length}))},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'E'})}).catch(()=>{});
+                    // #endregion
+                    
                     // Save draft with attachments
                     const draft = await EmailOperations.saveDraft({
                         to: [rfq.supplier_email],

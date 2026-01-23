@@ -288,10 +288,18 @@ const AttachmentUtils = {
     async prepareAttachmentsFromApi(filenames, rfqId = null) {
         const attachments = [];
         
+        // #region agent log
+        fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attachments.js:288',message:'Starting prepareAttachmentsFromApi',data:{filenamesCount:filenames.length,filenames:filenames,rfqId:rfqId},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'E'})}).catch(()=>{});
+        // #endregion
+        
         for (const filename of filenames) {
             try {
                 const contentBytes = await this.fetchFileFromBackendAsBase64(filename, rfqId);
                 const contentType = this.getContentTypeFromFilename(filename);
+                
+                // #region agent log
+                fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attachments.js:293',message:'File fetched and encoded',data:{filename:filename,contentBytesLength:contentBytes.length,contentType:contentType,hasContent:!!contentBytes},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'E'})}).catch(()=>{});
+                // #endregion
                 
                 attachments.push({
                     '@odata.type': '#microsoft.graph.fileAttachment',
@@ -302,10 +310,17 @@ const AttachmentUtils = {
                 
                 console.log(`✓ Prepared attachment from API: ${filename}`);
             } catch (error) {
+                // #region agent log
+                fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attachments.js:305',message:'Failed to prepare attachment',data:{filename:filename,errorMessage:error.message,errorName:error.name},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'E'})}).catch(()=>{});
+                // #endregion
                 console.error(`✗ Failed to prepare attachment ${filename}:`, error);
                 // Continue with other attachments - don't fail entire operation
             }
         }
+        
+        // #region agent log
+        fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attachments.js:310',message:'prepareAttachmentsFromApi completed',data:{totalAttachments:attachments.length,attachmentNames:attachments.map(a=>a.name)},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'E'})}).catch(()=>{});
+        // #endregion
         
         return attachments;
     }

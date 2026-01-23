@@ -241,6 +241,10 @@ const ApiClient = {
         
         const url = Config.apiUrl + endpoint;
         
+        // #region agent log
+        fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api-client.js:234',message:'Attempting to fetch file',data:{filename:filename,rfqId:rfqId,endpoint:endpoint,fullUrl:url},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'E'})}).catch(()=>{});
+        // #endregion
+        
         try {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), Config.REQUEST_TIMEOUT);
@@ -255,12 +259,27 @@ const ApiClient = {
             
             clearTimeout(timeoutId);
             
+            // #region agent log
+            fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api-client.js:248',message:'File fetch response received',data:{filename:filename,status:response.status,statusText:response.statusText,ok:response.ok,contentType:response.headers.get('content-type'),contentLength:response.headers.get('content-length')},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'E'})}).catch(()=>{});
+            // #endregion
+            
             if (!response.ok) {
+                // #region agent log
+                fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api-client.js:252',message:'File fetch failed',data:{filename:filename,status:response.status,statusText:response.statusText,url:url},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'E'})}).catch(()=>{});
+                // #endregion
                 throw new ApiError(`Failed to fetch file ${filename}: ${response.statusText}`, response.status);
             }
             
-            return await response.blob();
+            const blob = await response.blob();
+            // #region agent log
+            fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api-client.js:260',message:'File blob received',data:{filename:filename,blobSize:blob.size,blobType:blob.type},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'E'})}).catch(()=>{});
+            // #endregion
+            
+            return blob;
         } catch (error) {
+            // #region agent log
+            fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api-client.js:264',message:'File fetch error',data:{filename:filename,errorName:error.name,errorMessage:error.message,errorStack:error.stack,url:url},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'E'})}).catch(()=>{});
+            // #endregion
             if (error.name === 'AbortError') {
                 throw new ApiError(`Request timed out while fetching file ${filename}`, 408);
             }
