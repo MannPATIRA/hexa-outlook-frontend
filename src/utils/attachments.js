@@ -250,6 +250,96 @@ const AttachmentUtils = {
     },
 
     /**
+     * Test if a file is accessible from the backend
+     * Returns detailed diagnostic information
+     * @param {string} filename - Name of the file to test
+     * @returns {Promise<Object>} Diagnostic result
+     */
+    async testFileAccessibility(filename) {
+        const endpoint = `/files/${encodeURIComponent(filename)}`;
+        const url = Config.apiUrl + endpoint;
+        
+        const result = {
+            filename: filename,
+            url: url,
+            success: false,
+            status: null,
+            statusText: null,
+            contentType: null,
+            contentLength: null,
+            error: null,
+            errorDetails: null
+        };
+        
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout for test
+            
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: {
+                    'Accept': 'application/octet-stream'
+                },
+                signal: controller.signal
+            });
+            
+            clearTimeout(timeoutId);
+            
+            result.status = response.status;
+            result.statusText = response.statusText;
+            result.contentType = response.headers.get('content-type');
+            result.contentLength = response.headers.get('content-length');
+            
+            if (response.ok) {
+                const blob = await response.blob();
+                result.success = true;
+                result.blobSize = blob.size;
+            } else {
+                // Try to get error message from response
+                try {
+                    const errorText = await response.text();
+                    result.error = `HTTP ${response.status}: ${response.statusText}`;
+                    result.errorDetails = errorText.substring(0, 200);
+                } catch (e) {
+                    result.error = `HTTP ${response.status}: ${response.statusText}`;
+                }
+            }
+        } catch (error) {
+            if (error.name === 'AbortError') {
+                result.error = 'Request timed out after 10 seconds';
+            } else {
+                result.error = error.message;
+                result.errorDetails = error.toString();
+            }
+        }
+        
+        return result;
+    },
+
+    /**
+     * Test all STEP files and return diagnostic report
+     * @param {Array<string>} filenames - Array of filenames to test
+     * @returns {Promise<Object>} Diagnostic report
+     */
+    async runStepFileDiagnostics(filenames) {
+        const stepFiles = filenames.filter(f => this.isStepFile(f));
+        const results = [];
+        
+        for (const filename of stepFiles) {
+            const result = await this.testFileAccessibility(filename);
+            results.push(result);
+        }
+        
+        return {
+            totalStepFiles: stepFiles.length,
+            tested: results.length,
+            successful: results.filter(r => r.success).length,
+            failed: results.filter(r => !r.success).length,
+            results: results
+        };
+    },
+
+    /**
      * Fetch a file from backend and convert to base64 for Graph API
      * @param {string} filename - Name of the file
      * @param {string} rfqId - Optional RFQ ID

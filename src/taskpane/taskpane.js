@@ -5000,6 +5000,40 @@ async function handleGenerateRFQs() {
                     
                     if (stepFiles.length > 0) {
                         console.log(`🔧 STEP Files detected in attachment list: ${stepFiles.length} file(s)`, stepFiles);
+                        
+                        // Run diagnostics on STEP files BEFORE trying to attach
+                        Helpers.showLoading('Testing STEP file accessibility...');
+                        const diagnostics = await AttachmentUtils.runStepFileDiagnostics(stepFiles);
+                        
+                        // Show diagnostic results in UI
+                        if (diagnostics.failed > 0) {
+                            // Build detailed error message
+                            let errorDetails = `STEP FILE DIAGNOSTIC: ${diagnostics.failed} of ${diagnostics.totalStepFiles} STEP file(s) are NOT accessible from backend!\n\n`;
+                            
+                            diagnostics.results.forEach(r => {
+                                if (!r.success) {
+                                    errorDetails += `FILE: ${r.filename}\n`;
+                                    errorDetails += `URL: ${r.url}\n`;
+                                    errorDetails += `ERROR: ${r.error}\n`;
+                                    if (r.status) {
+                                        errorDetails += `STATUS: ${r.status} ${r.statusText}\n`;
+                                    }
+                                    if (r.errorDetails) {
+                                        errorDetails += `DETAILS: ${r.errorDetails}\n`;
+                                    }
+                                    errorDetails += '\n';
+                                }
+                            });
+                            
+                            console.error('STEP FILE DIAGNOSTIC RESULTS:', diagnostics);
+                            
+                            // Show persistent error - this is the root cause!
+                            alert('STEP FILE ERROR\n\n' + errorDetails + '\nThe backend file endpoint is not returning the STEP files. Please check:\n1. Are STEP files deployed to the server?\n2. Is the /api/files/ endpoint working?\n3. Check backend logs for errors.');
+                        } else if (diagnostics.successful > 0) {
+                            console.log('✓ All STEP files are accessible from backend:', diagnostics);
+                        }
+                        
+                        Helpers.showLoading('Preparing attachments...');
                     } else {
                         console.warn('⚠️ No STEP files found in attachment list. Expected STEP files from API response.');
                     }
@@ -5017,7 +5051,10 @@ async function handleGenerateRFQs() {
                     const stepFileErrors = apiErrors.filter(e => e.isStepFile);
                     if (stepFileErrors.length > 0) {
                         const failedStepFiles = stepFileErrors.map(e => e.filename).join(', ');
-                        Helpers.showError(`Warning: ${stepFileErrors.length} STEP file(s) could not be attached: ${failedStepFiles}`);
+                        const errorMessages = apiErrors.filter(e => e.isStepFile).map(e => `${e.filename}: ${e.errorMessage}`).join('\n');
+                        
+                        // Show detailed error with alert to ensure visibility
+                        alert(`STEP FILE ATTACHMENT FAILED\n\n${stepFileErrors.length} STEP file(s) could not be attached:\n\n${errorMessages}\n\nThe email drafts will be created with PDFs only.`);
                     }
                     
                     // Combine API files with defaults if some files were fetched successfully
