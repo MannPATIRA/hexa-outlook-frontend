@@ -250,6 +250,54 @@ const AttachmentUtils = {
     },
 
     /**
+     * Test backend health endpoint to verify deployment
+     * @returns {Promise<Object>} Health check result
+     */
+    async testBackendHealth() {
+        const url = Config.apiUrl + '/files/health';
+        const result = {
+            success: false,
+            status: null,
+            healthData: null,
+            error: null
+        };
+        
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000);
+            
+            const response = await fetch(url, {
+                method: 'GET',
+                signal: controller.signal
+            });
+            
+            clearTimeout(timeoutId);
+            result.status = response.status;
+            
+            if (response.ok) {
+                try {
+                    const healthData = await response.json();
+                    result.success = true;
+                    result.healthData = healthData;
+                } catch (e) {
+                    result.error = 'Failed to parse health check response';
+                }
+            } else {
+                const errorText = await response.text();
+                result.error = `HTTP ${response.status}: ${errorText}`;
+            }
+        } catch (error) {
+            if (error.name === 'AbortError') {
+                result.error = 'Health check timed out';
+            } else {
+                result.error = error.message;
+            }
+        }
+        
+        return result;
+    },
+
+    /**
      * Test if a file is accessible from the backend
      * Returns detailed diagnostic information
      * @param {string} filename - Name of the file to test

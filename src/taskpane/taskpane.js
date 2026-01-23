@@ -5001,6 +5001,30 @@ async function handleGenerateRFQs() {
                     if (stepFiles.length > 0) {
                         console.log(`🔧 STEP Files detected in attachment list: ${stepFiles.length} file(s)`, stepFiles);
                         
+                        // First, check backend health endpoint to verify deployment
+                        Helpers.showLoading('Checking backend deployment...');
+                        const healthCheck = await AttachmentUtils.testBackendHealth();
+                        
+                        if (healthCheck.success && healthCheck.healthData) {
+                            console.log('✓ Backend health check passed:', healthCheck.healthData);
+                            const availableFiles = healthCheck.healthData.available_files || [];
+                            const stepFilesOnServer = availableFiles.filter(f => {
+                                const ext = f.split('.').pop().toLowerCase();
+                                return ext === 'step' || ext === 'stp';
+                            });
+                            console.log(`📁 Backend reports ${availableFiles.length} total files, ${stepFilesOnServer.length} STEP files`);
+                            
+                            // Check if requested STEP files are on server
+                            const missingFiles = stepFiles.filter(f => !availableFiles.includes(f));
+                            if (missingFiles.length > 0) {
+                                console.warn(`⚠️ STEP files NOT on server: ${missingFiles.join(', ')}`);
+                                console.warn(`Available STEP files on server: ${stepFilesOnServer.join(', ')}`);
+                            }
+                        } else {
+                            console.warn('⚠️ Backend health check failed:', healthCheck.error);
+                            console.warn('This may indicate the backend changes are not deployed yet.');
+                        }
+                        
                         // Run diagnostics on STEP files BEFORE trying to attach
                         Helpers.showLoading('Testing STEP file accessibility...');
                         const diagnostics = await AttachmentUtils.runStepFileDiagnostics(stepFiles);
@@ -5009,6 +5033,21 @@ async function handleGenerateRFQs() {
                         if (diagnostics.failed > 0) {
                             // Build detailed error message
                             let errorDetails = `STEP FILE DIAGNOSTIC: ${diagnostics.failed} of ${diagnostics.totalStepFiles} STEP file(s) are NOT accessible from backend!\n\n`;
+                            
+                            // Add health check info if available
+                            if (healthCheck.success && healthCheck.healthData) {
+                                const availableFiles = healthCheck.healthData.available_files || [];
+                                const missingFiles = stepFiles.filter(f => !availableFiles.includes(f));
+                                if (missingFiles.length > 0) {
+                                    errorDetails += `BACKEND HEALTH CHECK:\n`;
+                                    errorDetails += `Files on server: ${availableFiles.length}\n`;
+                                    errorDetails += `STEP files on server: ${availableFiles.filter(f => {
+                                        const ext = f.split('.').pop().toLowerCase();
+                                        return ext === 'step' || ext === 'stp';
+                                    }).join(', ') || 'None'}\n`;
+                                    errorDetails += `Missing files: ${missingFiles.join(', ')}\n\n`;
+                                }
+                            }
                             
                             diagnostics.results.forEach(r => {
                                 if (!r.success) {
@@ -5028,7 +5067,7 @@ async function handleGenerateRFQs() {
                             console.error('STEP FILE DIAGNOSTIC RESULTS:', diagnostics);
                             
                             // Show persistent error - this is the root cause!
-                            alert('STEP FILE ERROR\n\n' + errorDetails + '\nThe backend file endpoint is not returning the STEP files. Please check:\n1. Are STEP files deployed to the server?\n2. Is the /api/files/ endpoint working?\n3. Check backend logs for errors.');
+                            alert('STEP FILE ERROR\n\n' + errorDetails + '\nThe backend file endpoint is not returning the STEP files. Please check:\n1. Are STEP files deployed to the server?\n2. Is the /api/files/ endpoint working?\n3. Check backend logs for errors.\n4. Verify backend changes are deployed to Render.');
                         } else if (diagnostics.successful > 0) {
                             console.log('✓ All STEP files are accessible from backend:', diagnostics);
                         }
