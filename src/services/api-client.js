@@ -200,15 +200,6 @@ const ApiClient = {
         return response.quotes || [];
     },
 
-    /**
-     * Get quote comparison for a PR showing all suppliers and their response status
-     * @param {string} prId - Purchase Requisition ID (e.g., "PR-001")
-     * @returns {Promise<Object>} Quote comparison data with suppliers and quotes
-     */
-    async getQuoteComparisonByPR(prId) {
-        return await this.get(`/quotes/pr/${prId}`);
-    },
-
     // ==================== DEMO ENDPOINTS ====================
 
     /**

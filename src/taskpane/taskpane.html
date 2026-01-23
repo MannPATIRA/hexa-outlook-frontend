@@ -432,19 +432,13 @@
                 
                 <div class="quote-comparison-header">
                     <h2 class="ms-font-l">Compare Quotes</h2>
-                    <div class="quote-comparison-controls">
-                        <label for="pr-select-quote-comparison">PR:</label>
-                        <select id="pr-select-quote-comparison" class="ms-Dropdown-select">
-                            <option value="">-- Select a PR --</option>
-                        </select>
-                        <button id="refresh-quotes-btn" class="ms-Button ms-Button--icon" title="Refresh Quotes">
-                            <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--Refresh"></i></span>
-                        </button>
-                    </div>
+                    <button id="refresh-quotes-btn" class="ms-Button ms-Button--icon" title="Refresh Quotes">
+                        <span class="ms-Button-icon"><i class="ms-Icon ms-Icon--Refresh"></i></span>
+                    </button>
                 </div>
 
                 <div id="quotes-container" class="quote-comparison-container">
-                    <p class="placeholder-text">Select a PR to view quote comparison</p>
+                    <p class="placeholder-text">Loading quotes from all Quotes folders...</p>
                 </div>
 
                 <div id="quote-summary" class="quote-summary hidden">
