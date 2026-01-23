@@ -4993,6 +4993,12 @@ async function handleGenerateRFQs() {
                         attachmentArray,
                         AppState.selectedPR?.pr_id
                     );
+                    
+                    // Check if file fetching failed (empty array returned)
+                    if (graphApiAttachments.length === 0) {
+                        console.warn('No attachments could be fetched from API, using default attachments');
+                        graphApiAttachments = await AttachmentUtils.prepareGraphApiAttachments();
+                    }
                 } else {
                     console.warn('No attachments found in RFQ response, using default attachments');
                     // Fallback to default attachments if API doesn't provide any
@@ -5046,6 +5052,12 @@ async function handleGenerateRFQs() {
                             console.warn(`Failed to fetch RFQ-specific attachments, using shared:`, rfqAttachError);
                             // Use shared attachments as fallback
                         }
+                    }
+                    
+                    // Check if attachments array is empty before saving draft
+                    if (rfqAttachments.length === 0) {
+                        console.warn(`No attachments for RFQ ${rfq.rfq_id}, using default attachments`);
+                        rfqAttachments = await AttachmentUtils.prepareGraphApiAttachments();
                     }
                     
                     console.log(`Creating draft for ${rfq.supplier_name} with ${rfqAttachments.length} attachment(s)...`);
