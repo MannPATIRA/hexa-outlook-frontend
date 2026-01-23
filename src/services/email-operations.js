@@ -796,30 +796,56 @@ const EmailOperations = {
         
         // Add attachments if provided
         if (options.attachments && Array.isArray(options.attachments) && options.attachments.length > 0) {
+            // Helper to detect STEP files
+            const isStepFile = (filename) => {
+                const ext = (filename || '').split('.').pop().toLowerCase();
+                return ext === 'step' || ext === 'stp';
+            };
+            
+            // Count STEP files before upload
+            const stepFilesToUpload = options.attachments.filter(a => isStepFile(a.name));
+            const pdfFilesToUpload = options.attachments.filter(a => (a.name || '').toLowerCase().endsWith('.pdf'));
+            
             console.log(`Adding ${options.attachments.length} attachment(s) to draft ${draft.id}`);
+            console.log(`  📎 Upload summary: ${pdfFilesToUpload.length} PDF(s), ${stepFilesToUpload.length} STEP file(s)`);
+            
+            if (stepFilesToUpload.length > 0) {
+                console.log(`  🔧 STEP files to upload:`, stepFilesToUpload.map(a => {
+                    const size = a.contentBytes ? (a.contentBytes.length / 1024).toFixed(2) : 0;
+                    return `${a.name} (${size} KB base64)`;
+                }));
+            }
+            
             console.log('Attachment details:', options.attachments.map(a => ({ name: a.name, hasContent: !!a.contentBytes })));
             
             // #region agent log
-            fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'email-operations.js:788',message:'Starting attachment upload to draft',data:{draftId:draft.id,attachmentsCount:options.attachments.length,attachments:options.attachments.map(a=>({name:a.name,hasContentBytes:!!a.contentBytes,contentBytesLength:a.contentBytes?.length,contentType:a.contentType}))},timestamp:Date.now(),sessionId:'debug-session',runId:'run3',hypothesisId:'F'})}).catch(()=>{});
+            fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'email-operations.js:788',message:'Starting attachment upload to draft',data:{draftId:draft.id,attachmentsCount:options.attachments.length,stepFilesCount:stepFilesToUpload.length,attachments:options.attachments.map(a=>({name:a.name,hasContentBytes:!!a.contentBytes,contentBytesLength:a.contentBytes?.length,contentType:a.contentType,isStepFile:isStepFile(a.name)}))},timestamp:Date.now(),sessionId:'debug-session',runId:'run3',hypothesisId:'F'})}).catch(()=>{});
             // #endregion
             
             let successfulUploads = 0;
             let failedUploads = 0;
+            let stepFilesUploaded = 0;
+            let stepFilesFailed = 0;
             
             for (let i = 0; i < options.attachments.length; i++) {
                 const attachment = options.attachments[i];
+                const isStep = isStepFile(attachment.name);
+                
                 try {
                     // Validate attachment has required fields
                     if (!attachment.contentBytes || attachment.contentBytes.length === 0) {
+                        if (isStep) {
+                            console.error(`🔧 [STEP FILE] CRITICAL: ${attachment.name} has no contentBytes!`);
+                        }
                         // #region agent log
-                        fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'email-operations.js:796',message:'Attachment validation failed - no contentBytes',data:{attachmentName:attachment.name,draftId:draft.id},timestamp:Date.now(),sessionId:'debug-session',runId:'run3',hypothesisId:'F'})}).catch(()=>{});
+                        fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'email-operations.js:796',message:'Attachment validation failed - no contentBytes',data:{attachmentName:attachment.name,draftId:draft.id,isStepFile:isStep},timestamp:Date.now(),sessionId:'debug-session',runId:'run3',hypothesisId:'F'})}).catch(()=>{});
                         // #endregion
                         throw new Error(`Attachment ${attachment.name} has no contentBytes`);
                     }
                     
                     if (!attachment.name) {
                         // #region agent log
-                        fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'email-operations.js:801',message:'Attachment validation failed - no name',data:{draftId:draft.id},timestamp:Date.now(),sessionId:'debug-session',runId:'run3',hypothesisId:'F'})}).catch(()=>{});
+                        fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'email-operations.js:801',message:'Attachment validation failed - no name',data:{draftId:draft.id,isStepFile:isStep},timestamp:Date.now(),sessionId:'debug-session',runId:'run3',hypothesisId:'F'})}).catch(()=>{});
                         // #endregion
                         throw new Error(`Attachment missing name`);
                     }
@@ -828,15 +854,20 @@ const EmailOperations = {
                     const attachmentPayload = {
                         '@odata.type': '#microsoft.graph.fileAttachment',
                         name: attachment.name,
-                        contentType: attachment.contentType || 'application/pdf',
+                        contentType: attachment.contentType || (isStep ? 'application/octet-stream' : 'application/pdf'),
                         contentBytes: attachment.contentBytes
                     };
                     
-                    console.log(`[saveDraft] Uploading attachment ${i + 1}/${options.attachments.length}: ${attachment.name}`);
-                    console.log(`[saveDraft] Content size: ${attachmentPayload.contentBytes.length} base64 chars`);
+                    if (isStep) {
+                        const sizeKB = (attachmentPayload.contentBytes.length / 1024).toFixed(2);
+                        console.log(`🔧 [STEP FILE] Uploading ${i + 1}/${options.attachments.length}: ${attachment.name} (${sizeKB} KB base64)`);
+                    } else {
+                        console.log(`[saveDraft] Uploading attachment ${i + 1}/${options.attachments.length}: ${attachment.name}`);
+                        console.log(`[saveDraft] Content size: ${attachmentPayload.contentBytes.length} base64 chars`);
+                    }
                     
                     // #region agent log
-                    fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'email-operations.js:812',message:'Uploading attachment to Graph API',data:{draftId:draft.id,attachmentName:attachment.name,contentBytesLength:attachmentPayload.contentBytes.length,contentType:attachmentPayload.contentType,attachmentIndex:i+1,totalAttachments:options.attachments.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run3',hypothesisId:'F'})}).catch(()=>{});
+                    fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'email-operations.js:812',message:'Uploading attachment to Graph API',data:{draftId:draft.id,attachmentName:attachment.name,contentBytesLength:attachmentPayload.contentBytes.length,contentType:attachmentPayload.contentType,attachmentIndex:i+1,totalAttachments:options.attachments.length,isStepFile:isStep},timestamp:Date.now(),sessionId:'debug-session',runId:'run3',hypothesisId:'F'})}).catch(()=>{});
                     // #endregion
                     
                     // Upload attachment to the draft
@@ -846,10 +877,15 @@ const EmailOperations = {
                     });
                     
                     // #region agent log
-                    fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'email-operations.js:820',message:'Attachment upload successful',data:{draftId:draft.id,attachmentName:attachment.name,result:result},timestamp:Date.now(),sessionId:'debug-session',runId:'run3',hypothesisId:'F'})}).catch(()=>{});
+                    fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'email-operations.js:820',message:'Attachment upload successful',data:{draftId:draft.id,attachmentName:attachment.name,result:result,isStepFile:isStep},timestamp:Date.now(),sessionId:'debug-session',runId:'run3',hypothesisId:'F'})}).catch(()=>{});
                     // #endregion
                     
-                    console.log(`[saveDraft] ✓ Successfully attached ${attachment.name} to draft ${draft.id}`);
+                    if (isStep) {
+                        console.log(`🔧 [STEP FILE] ✓ Successfully uploaded ${attachment.name} to draft ${draft.id}`);
+                        stepFilesUploaded++;
+                    } else {
+                        console.log(`[saveDraft] ✓ Successfully attached ${attachment.name} to draft ${draft.id}`);
+                    }
                     successfulUploads++;
                     
                     // Small delay between attachments to avoid rate limiting
@@ -858,10 +894,16 @@ const EmailOperations = {
                     }
                 } catch (attachmentError) {
                     failedUploads++;
+                    if (isStep) {
+                        stepFilesFailed++;
+                        console.error(`🔧 [STEP FILE] CRITICAL: Failed to upload ${attachment.name}:`, attachmentError);
+                        console.error(`  Error type: ${attachmentError.name}, Message: ${attachmentError.message}`);
+                    } else {
+                        console.error(`[saveDraft] ✗ CRITICAL: Failed to attach ${attachment.name}:`, attachmentError);
+                    }
                     // #region agent log
-                    fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'email-operations.js:827',message:'Attachment upload failed',data:{draftId:draft.id,attachmentName:attachment.name,errorMessage:attachmentError.message,errorName:attachmentError.name,errorStack:attachmentError.stack,hasContentBytes:!!attachment.contentBytes,contentBytesLength:attachment.contentBytes?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run3',hypothesisId:'F'})}).catch(()=>{});
+                    fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'email-operations.js:827',message:'Attachment upload failed',data:{draftId:draft.id,attachmentName:attachment.name,errorMessage:attachmentError.message,errorName:attachmentError.name,errorStack:attachmentError.stack,hasContentBytes:!!attachment.contentBytes,contentBytesLength:attachment.contentBytes?.length,isStepFile:isStep},timestamp:Date.now(),sessionId:'debug-session',runId:'run3',hypothesisId:'F'})}).catch(()=>{});
                     // #endregion
-                    console.error(`[saveDraft] ✗ CRITICAL: Failed to attach ${attachment.name}:`, attachmentError);
                     console.error('[saveDraft] Error details:', {
                         message: attachmentError.message,
                         stack: attachmentError.stack,
@@ -874,15 +916,38 @@ const EmailOperations = {
                 }
             }
             
+            // STEP file upload summary
+            if (stepFilesToUpload.length > 0) {
+                console.group('🔧 STEP File Upload Summary');
+                console.log(`Total STEP files to upload: ${stepFilesToUpload.length}`);
+                console.log(`Successfully uploaded: ${stepFilesUploaded}`);
+                console.log(`Failed: ${stepFilesFailed}`);
+                if (stepFilesFailed > 0) {
+                    console.error(`⚠️ WARNING: ${stepFilesFailed} STEP file(s) failed to upload!`);
+                } else if (stepFilesUploaded === stepFilesToUpload.length) {
+                    console.log(`✓ All ${stepFilesUploaded} STEP file(s) uploaded successfully`);
+                }
+                console.groupEnd();
+            }
+            
             // Check if all uploads failed
             if (successfulUploads === 0 && options.attachments.length > 0) {
                 console.error(`[saveDraft] CRITICAL: All ${options.attachments.length} attachment upload(s) failed!`);
                 console.error(`[saveDraft] Failed uploads: ${failedUploads}, Successful: ${successfulUploads}`);
+                if (stepFilesToUpload.length > 0) {
+                    console.error(`[saveDraft] STEP files: ${stepFilesFailed} failed out of ${stepFilesToUpload.length}`);
+                }
                 // Don't throw - allow draft to be created without attachments, but log critical error
             } else if (successfulUploads > 0 && failedUploads > 0) {
                 console.warn(`[saveDraft] Partial success: ${successfulUploads} succeeded, ${failedUploads} failed out of ${options.attachments.length} total`);
+                if (stepFilesToUpload.length > 0) {
+                    console.warn(`[saveDraft] STEP files: ${stepFilesUploaded} succeeded, ${stepFilesFailed} failed out of ${stepFilesToUpload.length}`);
+                }
             } else if (successfulUploads === options.attachments.length) {
                 console.log(`[saveDraft] ✓ All ${successfulUploads} attachment(s) uploaded successfully`);
+                if (stepFilesToUpload.length > 0) {
+                    console.log(`[saveDraft] ✓ All ${stepFilesUploaded} STEP file(s) uploaded successfully`);
+                }
             }
             
             // Verify attachments were added by fetching the draft
@@ -891,8 +956,25 @@ const EmailOperations = {
                 const attachmentCount = verifyDraft.attachments ? verifyDraft.attachments.length : 0;
                 console.log(`✓ Draft ${draft.id} now has ${attachmentCount} attachment(s)`);
                 
+                // Check for STEP files in verified draft
+                const stepFilesInDraft = (verifyDraft.attachments || []).filter(a => {
+                    const ext = (a.name || '').split('.').pop().toLowerCase();
+                    return ext === 'step' || ext === 'stp';
+                });
+                
+                if (stepFilesToUpload.length > 0) {
+                    console.log(`🔧 STEP files in draft: ${stepFilesInDraft.length} out of ${stepFilesToUpload.length} expected`);
+                    if (stepFilesInDraft.length === stepFilesToUpload.length) {
+                        console.log(`✓ All STEP files verified in draft:`, stepFilesInDraft.map(a => a.name));
+                    } else {
+                        console.warn(`⚠️ STEP file verification mismatch: Expected ${stepFilesToUpload.length}, found ${stepFilesInDraft.length}`);
+                        console.warn(`  Expected:`, stepFilesToUpload.map(a => a.name));
+                        console.warn(`  Found in draft:`, stepFilesInDraft.map(a => a.name));
+                    }
+                }
+                
                 // #region agent log
-                fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'email-operations.js:844',message:'Attachment verification result',data:{draftId:draft.id,expectedCount:options.attachments.length,actualCount:attachmentCount,attachments:verifyDraft.attachments?.map(a=>({name:a.name,size:a.size}))},timestamp:Date.now(),sessionId:'debug-session',runId:'run3',hypothesisId:'F'})}).catch(()=>{});
+                fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'email-operations.js:844',message:'Attachment verification result',data:{draftId:draft.id,expectedCount:options.attachments.length,actualCount:attachmentCount,stepFilesExpected:stepFilesToUpload.length,stepFilesFound:stepFilesInDraft.length,attachments:verifyDraft.attachments?.map(a=>({name:a.name,size:a.size}))},timestamp:Date.now(),sessionId:'debug-session',runId:'run3',hypothesisId:'F'})}).catch(()=>{});
                 // #endregion
                 
                 if (attachmentCount === 0) {

@@ -4988,6 +4988,23 @@ async function handleGenerateRFQs() {
                     const attachmentArray = Array.from(allAttachmentFilenames);
                     console.log(`Found ${attachmentArray.length} unique attachment(s) from API:`, attachmentArray);
                     
+                    // Verify STEP files are included
+                    const stepFiles = attachmentArray.filter(f => {
+                        const ext = f.split('.').pop().toLowerCase();
+                        return ext === 'step' || ext === 'stp';
+                    });
+                    const nonStepFiles = attachmentArray.filter(f => {
+                        const ext = f.split('.').pop().toLowerCase();
+                        return ext !== 'step' && ext !== 'stp';
+                    });
+                    
+                    if (stepFiles.length > 0) {
+                        console.log(`🔧 STEP Files detected in attachment list: ${stepFiles.length} file(s)`, stepFiles);
+                    } else {
+                        console.warn('⚠️ No STEP files found in attachment list. Expected STEP files from API response.');
+                    }
+                    console.log(`📄 Non-STEP files: ${nonStepFiles.length} file(s)`, nonStepFiles);
+                    
                     // Fetch and prepare attachments from backend
                     const apiAttachments = await AttachmentUtils.prepareAttachmentsFromApi(
                         attachmentArray,
@@ -5038,6 +5055,22 @@ async function handleGenerateRFQs() {
                         } catch (defaultError) {
                             console.warn('Default attachment preparation failed, using API files only:', defaultError);
                             graphApiAttachments = apiAttachments;
+                        }
+                    }
+                    
+                    // Verify STEP files are in the final attachment array
+                    const stepFilesInFinal = graphApiAttachments.filter(a => {
+                        const ext = (a.name || '').split('.').pop().toLowerCase();
+                        return ext === 'step' || ext === 'stp';
+                    });
+                    
+                    if (stepFiles.length > 0) {
+                        if (stepFilesInFinal.length === stepFiles.length) {
+                            console.log(`✓ All ${stepFiles.length} STEP file(s) are included in final attachments`);
+                        } else {
+                            console.warn(`⚠️ STEP file mismatch: Expected ${stepFiles.length}, found ${stepFilesInFinal.length} in final attachments`);
+                            console.warn(`  Expected STEP files:`, stepFiles);
+                            console.warn(`  Found STEP files:`, stepFilesInFinal.map(a => a.name));
                         }
                     }
                 } else {
@@ -5190,10 +5223,42 @@ async function handleGenerateRFQs() {
                         rfqAttachments = [];
                     }
                     
+                    // Pre-upload verification: Count and log STEP files
+                    const stepFilesBeforeUpload = rfqAttachments.filter(a => {
+                        const ext = (a.name || '').split('.').pop().toLowerCase();
+                        return ext === 'step' || ext === 'stp';
+                    });
+                    const pdfFilesBeforeUpload = rfqAttachments.filter(a => {
+                        const name = (a.name || '').toLowerCase();
+                        return name.endsWith('.pdf');
+                    });
+                    
                     console.log(`Creating draft for ${rfq.supplier_name} with ${rfqAttachments.length} attachment(s)...`);
+                    console.log(`  📎 Pre-upload verification: ${pdfFilesBeforeUpload.length} PDF(s), ${stepFilesBeforeUpload.length} STEP file(s)`);
+                    
+                    if (stepFilesBeforeUpload.length > 0) {
+                        console.log(`  🔧 STEP files to upload:`, stepFilesBeforeUpload.map(a => {
+                            const size = a.contentBytes ? (a.contentBytes.length / 1024).toFixed(2) : 0;
+                            return `${a.name} (${size} KB base64)`;
+                        }));
+                    } else if (rfq.attachments && Array.isArray(rfq.attachments)) {
+                        const expectedStepFiles = rfq.attachments.filter(f => {
+                            const ext = f.split('.').pop().toLowerCase();
+                            return ext === 'step' || ext === 'stp';
+                        });
+                        if (expectedStepFiles.length > 0) {
+                            console.warn(`  ⚠️ WARNING: Expected ${expectedStepFiles.length} STEP file(s) but none found in final attachment array!`);
+                            console.warn(`  Expected STEP files:`, expectedStepFiles);
+                        }
+                    }
+                    
+                    // Use AttachmentUtils to log summary
+                    if (typeof AttachmentUtils !== 'undefined' && AttachmentUtils.logAttachmentSummary) {
+                        AttachmentUtils.logAttachmentSummary(rfqAttachments, `before upload for ${rfq.supplier_name}`);
+                    }
                     
                     // #region agent log
-                    fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'taskpane.js:5051',message:'About to save draft with attachments',data:{supplierName:rfq.supplier_name,attachmentsCount:rfqAttachments.length,attachments:rfqAttachments.map(a=>({name:a.name,hasContentBytes:!!a.contentBytes,contentBytesLength:a.contentBytes?.length}))},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'E'})}).catch(()=>{});
+                    fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'taskpane.js:5051',message:'About to save draft with attachments',data:{supplierName:rfq.supplier_name,attachmentsCount:rfqAttachments.length,stepFilesCount:stepFilesBeforeUpload.length,attachments:rfqAttachments.map(a=>({name:a.name,hasContentBytes:!!a.contentBytes,contentBytesLength:a.contentBytes?.length}))},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'E'})}).catch(()=>{});
                     // #endregion
                     
                     // Save draft with attachments

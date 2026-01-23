@@ -280,6 +280,59 @@ const AttachmentUtils = {
     },
 
     /**
+     * Check if a filename is a STEP file
+     * @param {string} filename
+     * @returns {boolean}
+     */
+    isStepFile(filename) {
+        const ext = filename.split('.').pop().toLowerCase();
+        return ext === 'step' || ext === 'stp';
+    },
+
+    /**
+     * Log attachment summary with STEP file details
+     * @param {Array} attachments - Array of attachment objects
+     * @param {string} context - Context for the log (e.g., "before upload")
+     */
+    logAttachmentSummary(attachments, context = '') {
+        const pdfs = attachments.filter(a => a.name && a.name.toLowerCase().endsWith('.pdf'));
+        const stepFiles = attachments.filter(a => this.isStepFile(a.name || ''));
+        const others = attachments.filter(a => {
+            const name = (a.name || '').toLowerCase();
+            return !name.endsWith('.pdf') && !this.isStepFile(name);
+        });
+
+        console.group(`📎 Attachment Summary ${context ? `(${context})` : ''}`);
+        console.log(`Total: ${attachments.length} attachment(s)`);
+        console.log(`  PDFs: ${pdfs.length}`);
+        console.log(`  STEP files: ${stepFiles.length}`);
+        if (others.length > 0) {
+            console.log(`  Other files: ${others.length}`);
+        }
+        
+        if (stepFiles.length > 0) {
+            console.group('🔧 STEP Files:');
+            stepFiles.forEach(att => {
+                const size = att.contentBytes ? att.contentBytes.length : 0;
+                const sizeKB = (size / 1024).toFixed(2);
+                console.log(`  ✓ ${att.name} (${sizeKB} KB base64, type: ${att.contentType || 'unknown'})`);
+            });
+            console.groupEnd();
+        }
+        
+        if (pdfs.length > 0) {
+            console.group('📄 PDFs:');
+            pdfs.forEach(att => {
+                const size = att.contentBytes ? att.contentBytes.length : 0;
+                const sizeKB = (size / 1024).toFixed(2);
+                console.log(`  ✓ ${att.name} (${sizeKB} KB base64)`);
+            });
+            console.groupEnd();
+        }
+        console.groupEnd();
+    },
+
+    /**
      * Prepare attachments from API response filenames
      * @param {Array<string>} filenames - Array of filenames from API
      * @param {string} rfqId - Optional RFQ ID for file fetching
@@ -287,44 +340,112 @@ const AttachmentUtils = {
      */
     async prepareAttachmentsFromApi(filenames, rfqId = null) {
         const attachments = [];
+        const stepFilesProcessed = [];
+        const stepFilesFailed = [];
         
         // #region agent log
         fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attachments.js:288',message:'Starting prepareAttachmentsFromApi',data:{filenamesCount:filenames.length,filenames:filenames,rfqId:rfqId},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'E'})}).catch(()=>{});
         // #endregion
         
+        // Identify STEP files upfront
+        const stepFilenames = filenames.filter(f => this.isStepFile(f));
+        const nonStepFilenames = filenames.filter(f => !this.isStepFile(f));
+        
+        if (stepFilenames.length > 0) {
+            console.log(`🔧 Detected ${stepFilenames.length} STEP file(s) to process:`, stepFilenames);
+        }
+        
         for (const filename of filenames) {
+            const isStep = this.isStepFile(filename);
+            
+            if (isStep) {
+                console.log(`🔧 [STEP FILE] Starting fetch for: ${filename}`);
+            }
+            
             try {
                 const contentBytes = await this.fetchFileFromBackendAsBase64(filename, rfqId);
                 const contentType = this.getContentTypeFromFilename(filename);
                 
+                // STEP-specific validation
+                if (isStep) {
+                    if (!contentBytes || contentBytes.length === 0) {
+                        throw new Error(`STEP file ${filename} has empty contentBytes`);
+                    }
+                    if (contentType !== 'application/octet-stream') {
+                        console.warn(`⚠️ [STEP FILE] Unexpected content type for ${filename}: ${contentType} (expected application/octet-stream)`);
+                    }
+                    const sizeKB = (contentBytes.length / 1024).toFixed(2);
+                    console.log(`🔧 [STEP FILE] Successfully fetched and encoded: ${filename} (${sizeKB} KB base64)`);
+                }
+                
                 // #region agent log
-                fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attachments.js:293',message:'File fetched and encoded',data:{filename:filename,contentBytesLength:contentBytes.length,contentType:contentType,hasContent:!!contentBytes},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'E'})}).catch(()=>{});
+                fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attachments.js:293',message:'File fetched and encoded',data:{filename:filename,contentBytesLength:contentBytes.length,contentType:contentType,hasContent:!!contentBytes,isStepFile:isStep},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'E'})}).catch(()=>{});
                 // #endregion
                 
-                attachments.push({
+                const attachment = {
                     '@odata.type': '#microsoft.graph.fileAttachment',
                     name: filename,
                     contentType: contentType,
                     contentBytes: contentBytes
-                });
+                };
                 
-                console.log(`✓ Prepared attachment from API: ${filename}`);
+                attachments.push(attachment);
+                
+                if (isStep) {
+                    stepFilesProcessed.push(filename);
+                    console.log(`✓ [STEP FILE] Prepared attachment: ${filename}`);
+                } else {
+                    console.log(`✓ Prepared attachment from API: ${filename}`);
+                }
             } catch (error) {
-                // #region agent log
-                fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attachments.js:305',message:'Failed to prepare attachment',data:{filename:filename,errorMessage:error.message,errorName:error.name},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'E'})}).catch(()=>{});
-                // #endregion
-                console.error(`✗ Failed to prepare attachment ${filename}:`, error);
-                console.error(`  Error type: ${error.name}, Message: ${error.message}`);
+                if (isStep) {
+                    stepFilesFailed.push({ filename, error: error.message });
+                    console.error(`✗ [STEP FILE] CRITICAL: Failed to prepare STEP file ${filename}:`, error);
+                    console.error(`  Error type: ${error.name}, Message: ${error.message}`);
+                } else {
+                    console.error(`✗ Failed to prepare attachment ${filename}:`, error);
+                    console.error(`  Error type: ${error.name}, Message: ${error.message}`);
+                }
+                
                 if (error.stack) {
                     console.error(`  Stack: ${error.stack.substring(0, 200)}...`);
                 }
+                
+                // #region agent log
+                fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attachments.js:305',message:'Failed to prepare attachment',data:{filename:filename,errorMessage:error.message,errorName:error.name,isStepFile:isStep},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'E'})}).catch(()=>{});
+                // #endregion
+                
                 // Continue with other attachments - don't fail entire operation
             }
         }
         
+        // STEP file summary
+        if (stepFilenames.length > 0) {
+            console.group('🔧 STEP File Processing Summary');
+            console.log(`Total STEP files in request: ${stepFilenames.length}`);
+            console.log(`Successfully processed: ${stepFilesProcessed.length}`);
+            console.log(`Failed: ${stepFilesFailed.length}`);
+            if (stepFilesProcessed.length > 0) {
+                console.log(`✓ Successful STEP files:`, stepFilesProcessed);
+            }
+            if (stepFilesFailed.length > 0) {
+                console.error(`✗ Failed STEP files:`, stepFilesFailed.map(f => `${f.filename} (${f.error})`));
+            }
+            console.groupEnd();
+        }
+        
+        // Verify STEP files are in final array
+        const stepFilesInAttachments = attachments.filter(a => this.isStepFile(a.name));
+        if (stepFilenames.length > 0 && stepFilesInAttachments.length !== stepFilesProcessed.length) {
+            console.warn(`⚠️ WARNING: STEP file count mismatch! Expected ${stepFilesProcessed.length} in attachments array, found ${stepFilesInAttachments.length}`);
+        }
+        
         // #region agent log
-        fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attachments.js:310',message:'prepareAttachmentsFromApi completed',data:{totalAttachments:attachments.length,attachmentNames:attachments.map(a=>a.name)},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'E'})}).catch(()=>{});
+        fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attachments.js:310',message:'prepareAttachmentsFromApi completed',data:{totalAttachments:attachments.length,attachmentNames:attachments.map(a=>a.name),stepFilesCount:stepFilesInAttachments.length,stepFilesProcessed:stepFilesProcessed.length,stepFilesFailed:stepFilesFailed.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'E'})}).catch(()=>{});
         // #endregion
+        
+        // Log summary
+        this.logAttachmentSummary(attachments, 'after API fetch');
         
         return attachments;
     }
