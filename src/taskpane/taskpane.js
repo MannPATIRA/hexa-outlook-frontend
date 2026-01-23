@@ -5200,6 +5200,7 @@ async function handleGenerateRFQs() {
                     
                     // Use RFQ-specific attachments if available, otherwise use shared attachments
                     let rfqAttachments = graphApiAttachments;
+                    let rfqApiErrors = []; // Store errors for later display
                     if (rfq.attachments && Array.isArray(rfq.attachments) && rfq.attachments.length > 0) {
                         // Fetch attachments specific to this RFQ
                         try {
@@ -5208,13 +5209,18 @@ async function handleGenerateRFQs() {
                                 rfq.rfq_id  // Use RFQ ID for context
                             );
                             const rfqApiAttachments = rfqApiResult.attachments || [];
-                            const rfqApiErrors = rfqApiResult.errors || [];
+                            rfqApiErrors = rfqApiResult.errors || [];
                             
                             // Check for STEP file failures for this RFQ
                             const rfqStepFileErrors = rfqApiErrors.filter(e => e.isStepFile);
                             if (rfqStepFileErrors.length > 0) {
                                 const failedStepFiles = rfqStepFileErrors.map(e => e.filename).join(', ');
+                                const errorDetails = rfqStepFileErrors.map(e => `${e.filename}: ${e.errorMessage}`).join('\n');
                                 console.warn(`[${rfq.rfq_id}] STEP file failures: ${failedStepFiles}`);
+                                console.warn(`[${rfq.rfq_id}] Error details:\n${errorDetails}`);
+                                
+                                // Show detailed error immediately
+                                alert(`STEP FILE ERROR for ${rfq.supplier_name}\n\n${rfqStepFileErrors.length} STEP file(s) failed:\n\n${errorDetails}\n\nCheck backend file endpoint and file deployment.`);
                             }
                             
                             // Combine RFQ-specific files with defaults if some succeeded
@@ -5314,8 +5320,18 @@ async function handleGenerateRFQs() {
                         if (expectedStepFiles.length > 0) {
                             console.warn(`  ⚠️ WARNING: Expected ${expectedStepFiles.length} STEP file(s) but none found in final attachment array!`);
                             console.warn(`  Expected STEP files:`, expectedStepFiles);
-                            // Show UI warning
-                            Helpers.showError(`Warning: STEP file(s) for ${rfq.supplier_name} could not be attached: ${expectedStepFiles.join(', ')}`);
+                            
+                            // Build detailed error message with actual error details if available
+                            const stepFileErrors = rfqApiErrors.filter(e => e.isStepFile);
+                            let errorMessage = `Warning: STEP file(s) for ${rfq.supplier_name} could not be attached: ${expectedStepFiles.join(', ')}`;
+                            
+                            if (stepFileErrors.length > 0) {
+                                const errorDetails = stepFileErrors.map(e => `\n  • ${e.filename}: ${e.errorMessage}`).join('');
+                                errorMessage += `\n\nError details:${errorDetails}`;
+                            }
+                            
+                            // Show UI warning with error details
+                            Helpers.showError(errorMessage);
                         }
                     }
                     
