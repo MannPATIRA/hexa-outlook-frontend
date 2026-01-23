@@ -788,6 +788,12 @@ const EmailOperations = {
         fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'email-operations.js:787',message:'saveDraft called with attachments check',data:{hasAttachments:!!options.attachments,isArray:Array.isArray(options.attachments),attachmentsLength:options.attachments?.length,draftId:draft.id},timestamp:Date.now(),sessionId:'debug-session',runId:'run3',hypothesisId:'F'})}).catch(()=>{});
         // #endregion
         
+        // Validate attachments before proceeding
+        if (!options.attachments || !Array.isArray(options.attachments) || options.attachments.length === 0) {
+            console.warn(`[saveDraft] No attachments provided for draft ${draft.id} - draft will be created without attachments`);
+            console.warn(`[saveDraft] Attachments value:`, options.attachments);
+        }
+        
         // Add attachments if provided
         if (options.attachments && Array.isArray(options.attachments) && options.attachments.length > 0) {
             console.log(`Adding ${options.attachments.length} attachment(s) to draft ${draft.id}`);
@@ -796,6 +802,9 @@ const EmailOperations = {
             // #region agent log
             fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'email-operations.js:788',message:'Starting attachment upload to draft',data:{draftId:draft.id,attachmentsCount:options.attachments.length,attachments:options.attachments.map(a=>({name:a.name,hasContentBytes:!!a.contentBytes,contentBytesLength:a.contentBytes?.length,contentType:a.contentType}))},timestamp:Date.now(),sessionId:'debug-session',runId:'run3',hypothesisId:'F'})}).catch(()=>{});
             // #endregion
+            
+            let successfulUploads = 0;
+            let failedUploads = 0;
             
             for (let i = 0; i < options.attachments.length; i++) {
                 const attachment = options.attachments[i];
@@ -841,12 +850,14 @@ const EmailOperations = {
                     // #endregion
                     
                     console.log(`[saveDraft] ✓ Successfully attached ${attachment.name} to draft ${draft.id}`);
+                    successfulUploads++;
                     
                     // Small delay between attachments to avoid rate limiting
                     if (i < options.attachments.length - 1) {
                         await new Promise(resolve => setTimeout(resolve, 200));
                     }
                 } catch (attachmentError) {
+                    failedUploads++;
                     // #region agent log
                     fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'email-operations.js:827',message:'Attachment upload failed',data:{draftId:draft.id,attachmentName:attachment.name,errorMessage:attachmentError.message,errorName:attachmentError.name,errorStack:attachmentError.stack,hasContentBytes:!!attachment.contentBytes,contentBytesLength:attachment.contentBytes?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run3',hypothesisId:'F'})}).catch(()=>{});
                     // #endregion
@@ -861,6 +872,17 @@ const EmailOperations = {
                     });
                     // Continue with other attachments even if one fails
                 }
+            }
+            
+            // Check if all uploads failed
+            if (successfulUploads === 0 && options.attachments.length > 0) {
+                console.error(`[saveDraft] CRITICAL: All ${options.attachments.length} attachment upload(s) failed!`);
+                console.error(`[saveDraft] Failed uploads: ${failedUploads}, Successful: ${successfulUploads}`);
+                // Don't throw - allow draft to be created without attachments, but log critical error
+            } else if (successfulUploads > 0 && failedUploads > 0) {
+                console.warn(`[saveDraft] Partial success: ${successfulUploads} succeeded, ${failedUploads} failed out of ${options.attachments.length} total`);
+            } else if (successfulUploads === options.attachments.length) {
+                console.log(`[saveDraft] ✓ All ${successfulUploads} attachment(s) uploaded successfully`);
             }
             
             // Verify attachments were added by fetching the draft

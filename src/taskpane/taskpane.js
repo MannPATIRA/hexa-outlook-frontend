@@ -4997,25 +4997,65 @@ async function handleGenerateRFQs() {
                     // Check if file fetching failed (empty array returned)
                     if (graphApiAttachments.length === 0) {
                         console.warn('No attachments could be fetched from API, using default attachments');
-                        graphApiAttachments = await AttachmentUtils.prepareGraphApiAttachments();
+                        console.warn('This usually means the backend file endpoint /api/files/{filename} is not available or files are not accessible');
+                        try {
+                            graphApiAttachments = await AttachmentUtils.prepareGraphApiAttachments();
+                            console.log(`✓ Default attachments prepared: ${graphApiAttachments.length} file(s)`);
+                        } catch (defaultError) {
+                            console.error('CRITICAL: Default attachment preparation failed:', defaultError);
+                            console.error('Error details:', {
+                                message: defaultError.message,
+                                stack: defaultError.stack
+                            });
+                            graphApiAttachments = [];
+                        }
                     }
                 } else {
                     console.warn('No attachments found in RFQ response, using default attachments');
                     // Fallback to default attachments if API doesn't provide any
-                    graphApiAttachments = await AttachmentUtils.prepareGraphApiAttachments();
+                    try {
+                        graphApiAttachments = await AttachmentUtils.prepareGraphApiAttachments();
+                        console.log(`✓ Default attachments prepared: ${graphApiAttachments.length} file(s)`);
+                    } catch (defaultError) {
+                        console.error('CRITICAL: Default attachment preparation failed:', defaultError);
+                        console.error('Error details:', {
+                            message: defaultError.message,
+                            stack: defaultError.stack
+                        });
+                        graphApiAttachments = [];
+                    }
                 }
                 
                 console.log(`✓ Prepared ${graphApiAttachments.length} attachment(s) for drafts`);
             } catch (attachmentError) {
                 console.error('✗ Failed to prepare attachments from API:', attachmentError);
+                console.error('Error details:', {
+                    message: attachmentError.message,
+                    stack: attachmentError.stack,
+                    name: attachmentError.name
+                });
                 // Fallback to default attachments
                 try {
+                    console.log('Attempting to use default attachments as fallback...');
                     graphApiAttachments = await AttachmentUtils.prepareGraphApiAttachments();
-                    console.log('Using default attachments as fallback');
+                    console.log(`✓ Using default attachments as fallback: ${graphApiAttachments.length} file(s)`);
                 } catch (fallbackError) {
-                    console.error('Fallback attachment preparation also failed:', fallbackError);
+                    console.error('CRITICAL: Fallback attachment preparation also failed:', fallbackError);
+                    console.error('Fallback error details:', {
+                        message: fallbackError.message,
+                        stack: fallbackError.stack,
+                        name: fallbackError.name
+                    });
                     Helpers.showError('Failed to load attachments: ' + fallbackError.message);
+                    // Ensure we have an empty array, not undefined
+                    graphApiAttachments = [];
                 }
+            }
+            
+            // Ensure graphApiAttachments is always an array
+            if (!Array.isArray(graphApiAttachments)) {
+                console.warn('graphApiAttachments is not an array, initializing as empty array');
+                graphApiAttachments = [];
             }
             
             Helpers.showLoading(`Saving ${rfqs.length} draft(s) with attachments...`);
@@ -5049,15 +5089,42 @@ async function handleGenerateRFQs() {
                                 rfq.rfq_id  // Use RFQ ID for context
                             );
                         } catch (rfqAttachError) {
-                            console.warn(`Failed to fetch RFQ-specific attachments, using shared:`, rfqAttachError);
+                            console.warn(`Failed to fetch RFQ-specific attachments for ${rfq.rfq_id}, using shared:`, rfqAttachError);
+                            console.warn('RFQ-specific attachment error:', {
+                                message: rfqAttachError.message,
+                                rfqId: rfq.rfq_id,
+                                attachmentCount: rfq.attachments?.length
+                            });
                             // Use shared attachments as fallback
                         }
                     }
                     
-                    // Check if attachments array is empty before saving draft
+                    // Final safety check - if we have no attachments but expected some, use defaults
                     if (rfqAttachments.length === 0) {
                         console.warn(`No attachments for RFQ ${rfq.rfq_id}, using default attachments`);
-                        rfqAttachments = await AttachmentUtils.prepareGraphApiAttachments();
+                        try {
+                            rfqAttachments = await AttachmentUtils.prepareGraphApiAttachments();
+                            if (rfqAttachments.length === 0) {
+                                console.error('CRITICAL: Even default attachments failed to prepare!');
+                                // Continue anyway - at least the email will be created
+                            } else {
+                                console.log(`✓ Default attachments prepared: ${rfqAttachments.length} file(s)`);
+                            }
+                        } catch (defaultError) {
+                            console.error('CRITICAL: Default attachment preparation failed:', defaultError);
+                            console.error('Error details:', {
+                                message: defaultError.message,
+                                stack: defaultError.stack
+                            });
+                            // Continue - don't block email creation, but ensure array is not undefined
+                            rfqAttachments = [];
+                        }
+                    }
+                    
+                    // Ensure rfqAttachments is always an array before saving
+                    if (!Array.isArray(rfqAttachments)) {
+                        console.warn('rfqAttachments is not an array, initializing as empty array');
+                        rfqAttachments = [];
                     }
                     
                     console.log(`Creating draft for ${rfq.supplier_name} with ${rfqAttachments.length} attachment(s)...`);
