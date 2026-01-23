@@ -103,6 +103,9 @@ const ApiClient = {
             pr_id: prId,
             supplier_ids: supplierIds
         });
+        // #region agent log
+        fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api-client.js:106',message:'API response received',data:{hasResponse:!!response,hasRfqs:!!response.rfqs,rfqsLength:response.rfqs?.length,firstRfqAttachments:response.rfqs?.[0]?.attachments,firstRfqAttachmentsType:typeof response.rfqs?.[0]?.attachments,firstRfqAttachmentsIsArray:Array.isArray(response.rfqs?.[0]?.attachments),firstRfqBody:response.rfqs?.[0]?.body,fullResponse:JSON.stringify(response).substring(0,500)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+        // #endregion
         return response.rfqs || [];
     },
 

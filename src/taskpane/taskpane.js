@@ -4963,6 +4963,10 @@ async function handleGenerateRFQs() {
             AppState.selectedSuppliers
         );
         
+        // #region agent log
+        fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'taskpane.js:4964',message:'RFQs received from API',data:{rfqsLength:rfqs.length,firstRfq:rfqs[0],firstRfqAttachments:rfqs[0]?.attachments,firstRfqAttachmentsType:typeof rfqs[0]?.attachments,firstRfqAttachmentsIsArray:Array.isArray(rfqs[0]?.attachments),firstRfqAttachmentsLength:rfqs[0]?.attachments?.length,firstRfqBody:rfqs[0]?.body},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+        // #endregion
+        
         // Auto-save drafts if user is signed in
         if (AuthService.isSignedIn()) {
             Helpers.showLoading('Preparing attachments...');
@@ -5072,6 +5076,10 @@ async function handleGenerateRFQs() {
         
         AppState.rfqs = rfqs;
         
+        // #region agent log
+        fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'taskpane.js:5073',message:'RFQs stored in AppState',data:{appStateRfqsLength:AppState.rfqs.length,firstRfqInAppState:AppState.rfqs[0],firstRfqAttachments:AppState.rfqs[0]?.attachments,firstRfqAttachmentsLength:AppState.rfqs[0]?.attachments?.length,firstRfqAttachmentsType:typeof AppState.rfqs[0]?.attachments},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+        // #endregion
+        
         // Keep the Generate RFQs step enabled (highlighted) after completion
         // This matches the behavior of other completed steps (Select PR, Select Suppliers)
         const generateStep = document.getElementById('step-generate-rfqs');
@@ -5087,18 +5095,8 @@ async function handleGenerateRFQs() {
             Helpers.enableStep(reviewStep);
         }
         
-        // Clear the RFQ list container and show success message
-        const container = document.getElementById('rfq-list');
-        if (container) {
-            container.innerHTML = `
-                <div style="text-align: center; padding: 40px 20px; color: #107c10;">
-                    <div style="font-size: 48px; margin-bottom: 16px;">✓</div>
-                    <div style="font-size: 18px; font-weight: 600; margin-bottom: 8px;">RFQs Generated</div>
-                    <div style="font-size: 14px; color: #605e5c; margin-bottom: 16px;">${rfqs.length} RFQ draft(s) have been created and saved to your Drafts folder.</div>
-                    <div style="font-size: 13px; color: #0078d4; font-weight: 500;">Check your Drafts folder in Outlook to review and send them.</div>
-                </div>
-            `;
-        }
+        // Render RFQ cards in the review step
+        renderRFQCards(rfqs);
         
         Helpers.showSuccess(`${rfqs.length} RFQ(s) generated successfully`);
     } catch (error) {
@@ -5112,9 +5110,16 @@ function renderRFQCards(rfqs) {
     const container = document.getElementById('rfq-list');
     if (!container) return;
     
+    // #region agent log
+    fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'taskpane.js:5111',message:'renderRFQCards called',data:{rfqsLength:rfqs.length,firstRfq:rfqs[0],firstRfqAttachments:rfqs[0]?.attachments,firstRfqAttachmentsType:typeof rfqs[0]?.attachments,firstRfqAttachmentsIsArray:Array.isArray(rfqs[0]?.attachments),firstRfqAttachmentsLength:rfqs[0]?.attachments?.length,firstRfqBody:rfqs[0]?.body},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+    // #endregion
+    
     Helpers.clearChildren(container);
     
     rfqs.forEach((rfq, index) => {
+        // #region agent log
+        fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'taskpane.js:5117',message:'Rendering RFQ card',data:{index:index,rfqId:rfq.rfq_id,hasAttachments:!!rfq.attachments,attachmentsValue:rfq.attachments,attachmentsType:typeof rfq.attachments,attachmentsIsArray:Array.isArray(rfq.attachments),attachmentsLength:rfq.attachments?.length,hasBody:!!rfq.body,bodyDrawingFiles:rfq.body?.drawing_files,bodyStepFiles:rfq.body?.step_files,calculatedCount:rfq.attachments?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+        // #endregion
         const card = Helpers.createElement('div', {
             className: 'rfq-card',
             dataset: { rfqId: rfq.rfq_id, index: index }
