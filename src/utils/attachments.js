@@ -230,5 +230,83 @@ const AttachmentUtils = {
                 officeJs: []
             };
         }
+    },
+
+    /**
+     * Get MIME type from filename extension
+     * @param {string} filename
+     * @returns {string} MIME type
+     */
+    getContentTypeFromFilename(filename) {
+        const ext = filename.split('.').pop().toLowerCase();
+        const types = {
+            'pdf': 'application/pdf',
+            'step': 'application/octet-stream',
+            'stp': 'application/octet-stream',
+            'dwg': 'application/acad',
+            'dxf': 'application/dxf'
+        };
+        return types[ext] || 'application/octet-stream';
+    },
+
+    /**
+     * Fetch a file from backend and convert to base64 for Graph API
+     * @param {string} filename - Name of the file
+     * @param {string} rfqId - Optional RFQ ID
+     * @returns {Promise<string>} Base64-encoded content
+     */
+    async fetchFileFromBackendAsBase64(filename, rfqId = null) {
+        try {
+            const blob = await ApiClient.fetchFile(filename, rfqId);
+            
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                    const dataUrl = reader.result;
+                    const parts = dataUrl.split(',');
+                    if (parts.length < 2) {
+                        reject(new Error(`Invalid data URL format for ${filename}`));
+                        return;
+                    }
+                    resolve(parts[1]); // Return base64 without data URL prefix
+                };
+                reader.onerror = reject;
+                reader.readAsDataURL(blob);
+            });
+        } catch (error) {
+            console.error(`Error fetching file ${filename} from backend:`, error);
+            throw error;
+        }
+    },
+
+    /**
+     * Prepare attachments from API response filenames
+     * @param {Array<string>} filenames - Array of filenames from API
+     * @param {string} rfqId - Optional RFQ ID for file fetching
+     * @returns {Promise<Array>} Array of Graph API attachment objects
+     */
+    async prepareAttachmentsFromApi(filenames, rfqId = null) {
+        const attachments = [];
+        
+        for (const filename of filenames) {
+            try {
+                const contentBytes = await this.fetchFileFromBackendAsBase64(filename, rfqId);
+                const contentType = this.getContentTypeFromFilename(filename);
+                
+                attachments.push({
+                    '@odata.type': '#microsoft.graph.fileAttachment',
+                    name: filename,
+                    contentType: contentType,
+                    contentBytes: contentBytes
+                });
+                
+                console.log(`✓ Prepared attachment from API: ${filename}`);
+            } catch (error) {
+                console.error(`✗ Failed to prepare attachment ${filename}:`, error);
+                // Continue with other attachments - don't fail entire operation
+            }
+        }
+        
+        return attachments;
     }
 };

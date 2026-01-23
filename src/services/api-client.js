@@ -221,6 +221,54 @@ const ApiClient = {
             delay_seconds: options.delaySeconds || 30,
             quantity: options.quantity || 100
         });
+    },
+
+    // ==================== FILE ENDPOINTS ====================
+
+    /**
+     * Fetch a file from the backend file server
+     * @param {string} filename - Name of the file to fetch
+     * @param {string} rfqId - Optional RFQ ID for context
+     * @returns {Promise<Blob>} File blob
+     */
+    async fetchFile(filename, rfqId = null) {
+        const endpoint = rfqId 
+            ? `/files/rfq/${rfqId}/${encodeURIComponent(filename)}`
+            : `/files/${encodeURIComponent(filename)}`;
+        
+        const url = Config.apiUrl + endpoint;
+        
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), Config.REQUEST_TIMEOUT);
+            
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: {
+                    'Accept': 'application/octet-stream'
+                },
+                signal: controller.signal
+            });
+            
+            clearTimeout(timeoutId);
+            
+            if (!response.ok) {
+                throw new ApiError(`Failed to fetch file ${filename}: ${response.statusText}`, response.status);
+            }
+            
+            return await response.blob();
+        } catch (error) {
+            if (error.name === 'AbortError') {
+                throw new ApiError(`Request timed out while fetching file ${filename}`, 408);
+            }
+            if (error instanceof ApiError) {
+                throw error;
+            }
+            throw new ApiError(
+                `Network error fetching file ${filename}: ${error.message}`,
+                0
+            );
+        }
     }
 };
 

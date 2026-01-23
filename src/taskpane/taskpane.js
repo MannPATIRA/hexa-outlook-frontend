@@ -4967,34 +4967,48 @@ async function handleGenerateRFQs() {
         if (AuthService.isSignedIn()) {
             Helpers.showLoading('Preparing attachments...');
             
-            // Prepare PDF attachments for Graph API
+            // Prepare attachments from API response
             let graphApiAttachments = [];
             try {
-                console.log('Starting attachment preparation...');
-                graphApiAttachments = await AttachmentUtils.prepareGraphApiAttachments();
-                console.log(`✓ Prepared ${graphApiAttachments.length} attachment(s) for drafts`);
+                console.log('Starting attachment preparation from API...');
                 
-                // Verify attachments have content
-                for (const att of graphApiAttachments) {
-                    if (!att.contentBytes || att.contentBytes.length === 0) {
-                        console.error(`⚠ Attachment ${att.name} has no content!`);
-                    } else {
-                        console.log(`✓ Attachment ${att.name} has ${att.contentBytes.length} bytes`);
+                // Collect all unique attachments from all RFQs
+                const allAttachmentFilenames = new Set();
+                rfqs.forEach(rfq => {
+                    if (rfq.attachments && Array.isArray(rfq.attachments)) {
+                        rfq.attachments.forEach(filename => allAttachmentFilenames.add(filename));
                     }
+                });
+                
+                if (allAttachmentFilenames.size > 0) {
+                    const attachmentArray = Array.from(allAttachmentFilenames);
+                    console.log(`Found ${attachmentArray.length} unique attachment(s) from API:`, attachmentArray);
+                    
+                    // Fetch and prepare attachments from backend
+                    graphApiAttachments = await AttachmentUtils.prepareAttachmentsFromApi(
+                        attachmentArray,
+                        AppState.selectedPR?.pr_id
+                    );
+                } else {
+                    console.warn('No attachments found in RFQ response, using default attachments');
+                    // Fallback to default attachments if API doesn't provide any
+                    graphApiAttachments = await AttachmentUtils.prepareGraphApiAttachments();
                 }
                 
-                if (graphApiAttachments.length === 0) {
-                    console.warn('⚠ No attachments prepared - drafts will be created without PDFs');
-                    Helpers.showError('Warning: Could not load PDF attachments. Drafts will be created without them.');
-                }
+                console.log(`✓ Prepared ${graphApiAttachments.length} attachment(s) for drafts`);
             } catch (attachmentError) {
-                console.error('✗ CRITICAL: Failed to prepare attachments:', attachmentError);
-                console.error('Error stack:', attachmentError.stack);
-                Helpers.showError('Failed to load PDF attachments: ' + attachmentError.message);
-                // Continue without attachments if preparation fails
+                console.error('✗ Failed to prepare attachments from API:', attachmentError);
+                // Fallback to default attachments
+                try {
+                    graphApiAttachments = await AttachmentUtils.prepareGraphApiAttachments();
+                    console.log('Using default attachments as fallback');
+                } catch (fallbackError) {
+                    console.error('Fallback attachment preparation also failed:', fallbackError);
+                    Helpers.showError('Failed to load attachments: ' + fallbackError.message);
+                }
             }
             
-            Helpers.showLoading(`Saving ${rfqs.length} draft(s) with ${graphApiAttachments.length} attachment(s)...`);
+            Helpers.showLoading(`Saving ${rfqs.length} draft(s) with attachments...`);
             
             let successCount = 0;
             let failCount = 0;
@@ -5015,7 +5029,22 @@ async function handleGenerateRFQs() {
                         htmlBody = '<div>&nbsp;</div>';
                     }
                     
-                    console.log(`Creating draft for ${rfq.supplier_name} with ${graphApiAttachments.length} attachment(s)...`);
+                    // Use RFQ-specific attachments if available, otherwise use shared attachments
+                    let rfqAttachments = graphApiAttachments;
+                    if (rfq.attachments && Array.isArray(rfq.attachments) && rfq.attachments.length > 0) {
+                        // Fetch attachments specific to this RFQ
+                        try {
+                            rfqAttachments = await AttachmentUtils.prepareAttachmentsFromApi(
+                                rfq.attachments,
+                                rfq.rfq_id  // Use RFQ ID for context
+                            );
+                        } catch (rfqAttachError) {
+                            console.warn(`Failed to fetch RFQ-specific attachments, using shared:`, rfqAttachError);
+                            // Use shared attachments as fallback
+                        }
+                    }
+                    
+                    console.log(`Creating draft for ${rfq.supplier_name} with ${rfqAttachments.length} attachment(s)...`);
                     
                     // Save draft with attachments
                     const draft = await EmailOperations.saveDraft({
@@ -5023,7 +5052,7 @@ async function handleGenerateRFQs() {
                         subject: rfq.subject || '',
                         body: htmlBody,
                         cc: [],
-                        attachments: graphApiAttachments
+                        attachments: rfqAttachments  // Use RFQ-specific attachments
                     });
                     
                     // Store draft ID in RFQ object
@@ -5097,7 +5126,26 @@ function renderRFQCards(rfqs) {
             <div class="rfq-card-body">
                 <p><strong>To:</strong> ${Helpers.escapeHtml(rfq.supplier_email)}</p>
                 <p><strong>Subject:</strong> ${Helpers.escapeHtml(rfq.subject)}</p>
-                <p><strong>Attachments:</strong> ${rfq.attachments?.length || 0} file(s)</p>
+                
+                ${rfq.body?.drawing_files && rfq.body.drawing_files.length > 0 ? `
+                    <div class="rfq-attachments-section">
+                        <strong>Drawing Files:</strong>
+                        <ul class="rfq-attachment-list">
+                            ${rfq.body.drawing_files.map(f => `<li>${Helpers.escapeHtml(f)}</li>`).join('')}
+                        </ul>
+                    </div>
+                ` : ''}
+                
+                ${rfq.body?.step_files && rfq.body.step_files.length > 0 ? `
+                    <div class="rfq-attachments-section">
+                        <strong>STEP Files:</strong>
+                        <ul class="rfq-attachment-list">
+                            ${rfq.body.step_files.map(f => `<li>${Helpers.escapeHtml(f)}</li>`).join('')}
+                        </ul>
+                    </div>
+                ` : ''}
+                
+                <p><strong>Total Attachments:</strong> ${rfq.attachments?.length || 0} file(s)</p>
             </div>
             <div class="rfq-card-actions">
                 <button class="ms-Button ms-Button--small" onclick="previewRFQ(${index})">
