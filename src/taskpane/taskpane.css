@@ -2489,6 +2489,187 @@ textarea.ms-TextField-field {
     background: #a19f9d;
 }
 
+/* Quote Comparison Controls */
+.quote-comparison-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.quote-comparison-controls label {
+    font-weight: 600;
+    margin-right: 5px;
+}
+
+.quote-comparison-controls select {
+    min-width: 200px;
+}
+
+/* Suppliers Section */
+.suppliers-section {
+    margin: 20px 0;
+}
+
+.suppliers-section h3 {
+    margin-bottom: 15px;
+    color: #0d3d61;
+}
+
+.suppliers-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.supplier-item {
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    padding: 15px;
+    background: white;
+    transition: box-shadow 0.2s;
+}
+
+.supplier-item:hover {
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.supplier-item.has-quote {
+    border-left: 4px solid #4caf50;
+}
+
+.supplier-item.no-quote {
+    border-left: 4px solid #ff9800;
+}
+
+.supplier-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.supplier-name {
+    font-weight: 600;
+    font-size: 16px;
+    color: #0d3d61;
+}
+
+.supplier-details {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    font-size: 12px;
+    color: #666;
+}
+
+.supplier-details small {
+    display: block;
+}
+
+.quote-preview {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid #eee;
+}
+
+.status-badge {
+    padding: 4px 8px;
+    border-radius: 3px;
+    font-size: 12px;
+    font-weight: bold;
+    white-space: nowrap;
+}
+
+.status-badge.responded {
+    background-color: #4caf50;
+    color: white;
+}
+
+.status-badge.pending {
+    background-color: #ff9800;
+    color: white;
+}
+
+/* Quotes Section */
+.quotes-section {
+    margin: 30px 0;
+}
+
+.quotes-section h3 {
+    margin-bottom: 15px;
+    color: #0d3d61;
+}
+
+.quotes-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 10px;
+    background: white;
+}
+
+.quotes-table th,
+.quotes-table td {
+    padding: 10px;
+    text-align: left;
+    border-bottom: 1px solid #ddd;
+}
+
+.quotes-table th {
+    background: #f5f5f5;
+    font-weight: bold;
+    color: #0d3d61;
+}
+
+.quotes-table tbody tr:hover {
+    background-color: #f9f9f9;
+}
+
+/* Pending Section */
+.pending-section {
+    margin: 30px 0;
+    padding: 15px;
+    background: #fff3cd;
+    border-radius: 5px;
+    border-left: 4px solid #ff9800;
+}
+
+.pending-section h3 {
+    margin-bottom: 10px;
+    color: #856404;
+}
+
+.pending-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.pending-list li {
+    padding: 8px;
+    background: white;
+    margin: 5px 0;
+    border-radius: 3px;
+    border-left: 3px solid #ff9800;
+}
+
+/* Summary Stats */
+.summary-stat {
+    text-align: center;
+    padding: 10px;
+}
+
+.stat-value {
+    font-size: 24px;
+    font-weight: bold;
+    color: #0d3d61;
+}
+
+.stat-label {
+    font-size: 12px;
+    color: #666;
+    margin-top: 5px;
+}
+
 /* ==================== QUOTE COMPARISON MODAL ==================== */
 
 .modal-overlay {

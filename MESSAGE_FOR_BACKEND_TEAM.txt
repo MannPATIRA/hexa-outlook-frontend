@@ -1,0 +1,25 @@
+Hi Backend Team,
+
+The STEP file 404 errors are still occurring after the recent changes. The frontend is getting:
+
+HTTP 404 - {"detail":"Not Found"}
+
+for these files:
+- model_PR001.step
+- assembly_PR001.step
+
+Frontend is requesting:
+- https://hexa-outlook-backend.onrender.com/api/files/model_PR001.step
+- https://hexa-outlook-backend.onrender.com/api/files/assembly_PR001.step
+
+Quick questions:
+
+1. Are the backend changes deployed to Render? (committed ≠ deployed)
+2. Can you test the health endpoint: https://hexa-outlook-backend.onrender.com/api/files/health
+   - Does it show model_PR001.step and assembly_PR001.step in the available_files list?
+3. Are the files actually on the Render server filesystem? (not just in git)
+4. What do the backend logs show when these URLs are requested?
+
+The frontend now has a health check that will show what files the backend reports as available vs what we're requesting, which should help diagnose the issue.
+
+Thanks!

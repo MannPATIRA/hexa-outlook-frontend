@@ -4250,8 +4250,15 @@ function setupEventListeners() {
     document.getElementById('create-engineer-draft-btn')?.addEventListener('click', handleCreateEngineerDraft);
 
     // Quote comparison
-    document.getElementById('refresh-quotes-btn')?.addEventListener('click', () => {
-        loadAllQuotesFromFolder();
+    document.getElementById('refresh-quotes-btn')?.addEventListener('click', async () => {
+        const prSelect = document.getElementById('pr-select-quote-comparison');
+        const prId = prSelect?.value || AppState.selectedPR?.pr_id;
+        
+        if (prId) {
+            await loadQuoteComparison(prId);
+        } else {
+            Helpers.showError('Please select a PR first');
+        }
     });
 
     // RFQ Preview Modal
@@ -6104,28 +6111,9 @@ async function handleCreateEngineerDraft() {
 }
 
 // ==================== QUOTE COMPARISON ====================
-async function loadAvailableRFQs() {
-    // In a real implementation, this would fetch from the backend
-    // For now, use the RFQs we've generated in this session
-    const select = document.getElementById('rfq-select');
-    if (!select) return;
-    
-    // Clear existing options except the first
-    while (select.options.length > 1) {
-        select.remove(1);
-    }
-    
-    // Add RFQs
-    AppState.rfqs.forEach(rfq => {
-        const option = document.createElement('option');
-        option.value = rfq.rfq_id;
-        option.textContent = `${rfq.rfq_id} - ${rfq.supplier_name}`;
-        select.appendChild(option);
-    });
-}
 
 /**
- * Show quote comparison view and automatically load all quotes
+ * Show quote comparison view and load quotes for selected PR
  */
 async function showQuoteComparisonView() {
     // Hide all modes
@@ -6147,8 +6135,71 @@ async function showQuoteComparisonView() {
         quoteComparisonTab.classList.add('active');
         mainContent.style.display = 'block';
         
-        // Automatically load all quotes
-        await loadAllQuotesFromFolder();
+        // Populate PR selector
+        await populatePRSelectorForQuoteComparison();
+        
+        // Load quotes for selected PR (if available)
+        const prSelect = document.getElementById('pr-select-quote-comparison');
+        if (prSelect && prSelect.value) {
+            await loadQuoteComparison(prSelect.value);
+        } else if (AppState.selectedPR) {
+            // Use currently selected PR
+            prSelect.value = AppState.selectedPR.pr_id;
+            await loadQuoteComparison(AppState.selectedPR.pr_id);
+        } else {
+            const container = document.getElementById('quotes-container');
+            if (container) {
+                container.innerHTML = '<p class="placeholder-text">Please select a PR to view quote comparison</p>';
+            }
+        }
+    }
+}
+
+/**
+ * Populate PR selector dropdown for quote comparison
+ */
+async function populatePRSelectorForQuoteComparison() {
+    const prSelect = document.getElementById('pr-select-quote-comparison');
+    if (!prSelect) return;
+    
+    // Clear existing options except the first
+    while (prSelect.options.length > 1) {
+        prSelect.remove(1);
+    }
+    
+    try {
+        // Load PRs from backend
+        const prs = await ApiClient.getPRs();
+        
+        prs.forEach(pr => {
+            const option = document.createElement('option');
+            option.value = pr.pr_id;
+            option.textContent = `${pr.pr_id} - ${pr.material || 'N/A'}`;
+            prSelect.appendChild(option);
+        });
+        
+        // Set default to selected PR if available
+        if (AppState.selectedPR) {
+            prSelect.value = AppState.selectedPR.pr_id;
+        }
+        
+        // Add change handler (remove existing first to avoid duplicates)
+        const existingHandler = prSelect.onchange;
+        prSelect.onchange = null;
+        prSelect.addEventListener('change', async (e) => {
+            const selectedPrId = e.target.value;
+            if (selectedPrId) {
+                await loadQuoteComparison(selectedPrId);
+            } else {
+                const container = document.getElementById('quotes-container');
+                if (container) {
+                    container.innerHTML = '<p class="placeholder-text">Please select a PR to view quote comparison</p>';
+                }
+            }
+        });
+    } catch (error) {
+        console.error('Error loading PRs for quote comparison:', error);
+        Helpers.showError('Failed to load PRs: ' + error.message);
     }
 }
 
@@ -6388,8 +6439,24 @@ async function loadAllQuotesFromFolder() {
             });
         }
         
-        // Render comparison table
-        renderQuoteComparison(quotes);
+        // Display quotes (legacy function - kept for potential modal use)
+        // Note: This function loads from Outlook folders, not from backend API
+        if (quotes.length > 0) {
+            // Simple display for legacy quotes from folders
+            const quotesHtml = quotes.map(quote => {
+                const price = quote.price || quote.unit_price || quote.total_price || 'N/A';
+                return `
+                    <div class="quote-item">
+                        <strong>${Helpers.escapeHtml(quote.supplier_name || 'Unknown')}</strong>
+                        <div>Price: ${price !== 'N/A' ? Helpers.formatCurrency(price, quote.currency || 'USD') : 'N/A'}</div>
+                        <div>Delivery: ${Helpers.escapeHtml(quote.delivery_time || quote.lead_time || 'N/A')}</div>
+                    </div>
+                `;
+            }).join('');
+            container.innerHTML = `<div class="quotes-list">${quotesHtml}</div>`;
+        } else {
+            container.innerHTML = '<p class="placeholder-text">No quotes found</p>';
+        }
         Helpers.hideLoading();
         
     } catch (error) {
@@ -6650,183 +6717,200 @@ async function extractQuoteFromEmail(email) {
     }
 }
 
-async function handleRFQSelect(event) {
-    const rfqId = event.target.value;
-    
-    if (!rfqId) {
-        document.getElementById('quotes-container').innerHTML = 
-            '<p class="placeholder-text">Select an RFQ to view and compare quotes</p>';
+/**
+ * Load quote comparison for a PR
+ * @param {string} prId - Purchase Requisition ID
+ */
+async function loadQuoteComparison(prId) {
+    if (!prId) {
+        const container = document.getElementById('quotes-container');
+        if (container) {
+            container.innerHTML = '<p class="placeholder-text">Please select a PR to view quote comparison</p>';
+        }
         return;
     }
-    
+
     try {
-        Helpers.showLoading('Loading quotes...');
+        Helpers.showLoading('Loading quote comparison...');
         
-        const quotes = await ApiClient.getQuotes(rfqId);
-        renderQuoteComparison(quotes);
+        const comparisonData = await ApiClient.getQuoteComparisonByPR(prId);
+        displayQuoteComparison(comparisonData);
     } catch (error) {
-        Helpers.showError('Failed to load quotes: ' + error.message);
+        console.error('Error loading quote comparison:', error);
+        Helpers.showError('Failed to load quote comparison: ' + error.message);
+        const container = document.getElementById('quotes-container');
+        if (container) {
+            container.innerHTML = `<p class="error-text">Error: ${Helpers.escapeHtml(error.message)}</p>`;
+        }
     } finally {
         Helpers.hideLoading();
     }
 }
 
-function renderQuoteComparison(quotes) {
+/**
+ * Display quote comparison with all suppliers and their status
+ * @param {Object} comparisonData - Response from GET /api/quotes/pr/{pr_id}
+ */
+function displayQuoteComparison(comparisonData) {
     const container = document.getElementById('quotes-container');
+    const summaryContainer = document.getElementById('summary-content');
+    const summarySection = document.getElementById('quote-summary');
+    
     if (!container) return;
     
     Helpers.clearChildren(container);
     
-    if (quotes.length === 0) {
-        container.innerHTML = '<p class="placeholder-text">No quotes found in Quotes folders</p>';
-        Helpers.hideElement(document.getElementById('quote-summary'));
+    const {
+        pr_id,
+        suppliers_sent_rfq = [],
+        quotes_received = [],
+        suppliers_without_quotes = []
+    } = comparisonData;
+    
+    // Handle empty state
+    if (suppliers_sent_rfq.length === 0) {
+        container.innerHTML = '<p class="placeholder-text">No RFQs have been sent for this PR yet.</p>';
+        if (summarySection) summarySection.classList.add('hidden');
         return;
     }
     
-    // Calculate best prices and statistics (only from quotes with valid prices)
-    const prices = quotes
-        .map(q => {
-            // Try unit_price first, then total_price, then price
-            const unitPrice = q.unit_price ? parseFloat(q.unit_price) : null;
-            const totalPrice = q.total_price ? parseFloat(q.total_price) : null;
-            const price = q.price ? parseFloat(q.price) : null;
-            
-            // Prefer unit price for comparison, fallback to total or price
-            const comparisonPrice = unitPrice || totalPrice || price;
-            return comparisonPrice && comparisonPrice > 0 ? comparisonPrice : null;
-        })
-        .filter(p => p !== null && p > 0);
-    
-    const lowestPrice = prices.length > 0 ? Math.min(...prices) : null;
-    const highestPrice = prices.length > 0 ? Math.max(...prices) : null;
-    const averagePrice = prices.length > 0 ? prices.reduce((a, b) => a + b, 0) / prices.length : null;
-    
-    // Find fastest delivery (assuming delivery_time is in a comparable format)
-    const quotesWithDelivery = quotes.filter(q => q.delivery_time);
-    const fastestDelivery = quotesWithDelivery.length > 0 
-        ? quotesWithDelivery.reduce((fastest, current) => {
-            // Simple comparison - in production, parse delivery times properly
-            return current;
-        }, quotesWithDelivery[0])
-        : null;
-    
-    // Create cards container
-    const cardsContainer = document.createElement('div');
-    cardsContainer.className = 'quote-cards-container';
-    
-    quotes.forEach((quote, index) => {
-        // Handle quotes with minimal information gracefully
-        const unitPrice = quote.unit_price ? parseFloat(quote.unit_price) : null;
-        const totalPrice = quote.total_price ? parseFloat(quote.total_price) : null;
-        const price = quote.price ? parseFloat(quote.price) : null;
-        
-        // For display, use unit price if available, otherwise total or price
-        const displayPrice = unitPrice !== null && !isNaN(unitPrice) && unitPrice > 0 
-            ? unitPrice 
-            : (totalPrice !== null && !isNaN(totalPrice) && totalPrice > 0 
-                ? totalPrice 
-                : (price !== null && !isNaN(price) && price > 0 ? price : null));
-        
-        const leadTime = quote.lead_time || quote.delivery_time || '';
-        const contactInfo = quote.supplier_email || quote.supplier_id || '';
-        
-        // Build meta line (payment terms and validity)
-        const metaParts = [];
-        if (quote.payment_terms) metaParts.push(Helpers.escapeHtml(quote.payment_terms));
-        if (quote.validity || quote.validity_period) metaParts.push(Helpers.escapeHtml(quote.validity || quote.validity_period));
-        const metaLine = metaParts.length > 0 ? metaParts.join(' • ') : '';
-        
-        const card = document.createElement('div');
-        card.className = 'quote-card';
-        if (quoteComparisonState.selectedIndex === index) {
-            card.classList.add('selected');
-        }
-        card.dataset.quoteIndex = index;
-        
-        card.innerHTML = `
-            <div class="quote-card-header">
-                <div class="quote-card-main">
-                    <div class="quote-card-supplier">${Helpers.escapeHtml(quote.supplier_name || 'Unknown')}</div>
-                    ${contactInfo ? `<div class="quote-card-contact">${Helpers.escapeHtml(contactInfo)}</div>` : ''}
-                </div>
-                ${displayPrice !== null ? `<div class="quote-card-price">${Helpers.formatCurrency(displayPrice, quote.currency || 'USD')}</div>` : '<div class="quote-card-price">-</div>'}
+    // Show summary section
+    if (summarySection) summarySection.classList.remove('hidden');
+    if (summaryContainer) {
+        summaryContainer.innerHTML = `
+            <div class="summary-stat">
+                <div class="stat-value">${suppliers_sent_rfq.length}</div>
+                <div class="stat-label">Suppliers Contacted</div>
             </div>
-            ${leadTime ? `<div class="quote-card-leadtime">${Helpers.escapeHtml(leadTime)}</div>` : ''}
-            ${metaLine ? `<div class="quote-card-meta">${metaLine}</div>` : ''}
+            <div class="summary-stat">
+                <div class="stat-value">${quotes_received.length}</div>
+                <div class="stat-label">Quotes Received</div>
+            </div>
+            <div class="summary-stat">
+                <div class="stat-value">${suppliers_without_quotes.length}</div>
+                <div class="stat-label">Awaiting Response</div>
+            </div>
         `;
+    }
+    
+    // Create suppliers section
+    const suppliersSection = document.createElement('div');
+    suppliersSection.className = 'suppliers-section';
+    suppliersSection.innerHTML = '<h3>Suppliers Sent RFQ</h3>';
+    
+    const suppliersList = document.createElement('div');
+    suppliersList.className = 'suppliers-list';
+    
+    suppliers_sent_rfq.forEach(supplier => {
+        const hasQuote = quotes_received.some(q => 
+            q.supplier_name === supplier.supplier_name || 
+            q.supplier_id === supplier.supplier_id
+        );
+        const status = hasQuote ? '✅ Responded' : '⏳ Awaiting Response';
+        const quote = hasQuote ? quotes_received.find(q => 
+            q.supplier_name === supplier.supplier_name || 
+            q.supplier_id === supplier.supplier_id
+        ) : null;
         
-        // Add click handler for selection
-        card.addEventListener('click', () => {
-            // Remove selected class from all cards
-            cardsContainer.querySelectorAll('.quote-card').forEach(c => c.classList.remove('selected'));
-            // Add selected class to clicked card
-            card.classList.add('selected');
-            // Update state
-            quoteComparisonState.selectedIndex = index;
-        });
-        
-        cardsContainer.appendChild(card);
+        const supplierItem = document.createElement('div');
+        supplierItem.className = `supplier-item ${hasQuote ? 'has-quote' : 'no-quote'}`;
+        supplierItem.innerHTML = `
+            <div class="supplier-info">
+                <div class="supplier-name">${Helpers.escapeHtml(supplier.supplier_name || 'Unknown')}</div>
+                <span class="status-badge ${hasQuote ? 'responded' : 'pending'}">${status}</span>
+            </div>
+            <div class="supplier-details">
+                <div><small><strong>Email:</strong> ${Helpers.escapeHtml(supplier.supplier_email || 'N/A')}</small></div>
+                <div><small><strong>RFQ ID:</strong> ${Helpers.escapeHtml(supplier.rfq_id || 'N/A')}</small></div>
+                <div><small><strong>RFQ Status:</strong> ${Helpers.escapeHtml(supplier.rfq_status || 'N/A')}</small></div>
+                ${quote ? `
+                    <div class="quote-preview">
+                        <small><strong>Price:</strong> ${quote.price ? Helpers.formatCurrency(quote.price, quote.currency || 'USD') : 'N/A'}</small>
+                        <small><strong>Delivery:</strong> ${Helpers.escapeHtml(quote.delivery_time || 'N/A')}</small>
+                    </div>
+                ` : ''}
+            </div>
+        `;
+        suppliersList.appendChild(supplierItem);
     });
     
-    container.appendChild(cardsContainer);
+    suppliersSection.appendChild(suppliersList);
+    container.appendChild(suppliersSection);
     
-    // Enhanced summary
-    const summaryContainer = document.getElementById('summary-content');
-    const summarySection = document.getElementById('quote-summary');
-    
-    if (quotes.length > 0) {
-        if (summaryContainer) {
-            const lowestQuote = quotes.find(q => {
-                const price = parseFloat(q.unit_price) || parseFloat(q.total_price) || parseFloat(q.price) || 0;
-                return price > 0 && price === lowestPrice;
-            }) || quotes[0];
-            
-            summaryContainer.innerHTML = `
-                <div class="summary-card">
-                    <div class="summary-label">Lowest Price</div>
-                    <div class="summary-value highlight">
-                        ${lowestPrice ? Helpers.formatCurrency(lowestPrice, lowestQuote.currency || 'USD') : 'N/A'}
-                    </div>
-                    <div class="summary-subtext">${Helpers.escapeHtml(lowestQuote.supplier_name || '')}</div>
-                </div>
-                ${averagePrice ? `
-                <div class="summary-card">
-                    <div class="summary-label">Average Price</div>
-                    <div class="summary-value">
-                        ${Helpers.formatCurrency(averagePrice, lowestQuote.currency || 'USD')}
-                    </div>
-                </div>
-                ` : ''}
-                ${lowestPrice && highestPrice ? `
-                <div class="summary-card">
-                    <div class="summary-label">Price Range</div>
-                    <div class="summary-value">
-                        ${Helpers.formatCurrency(lowestPrice, lowestQuote.currency || 'USD')} - 
-                        ${Helpers.formatCurrency(highestPrice, lowestQuote.currency || 'USD')}
-                    </div>
-                </div>
-                ` : ''}
-                <div class="summary-card">
-                    <div class="summary-label">Total Quotes</div>
-                    <div class="summary-value">${quotes.length}</div>
-                </div>
-                ${fastestDelivery ? `
-                <div class="summary-card">
-                    <div class="summary-label">Fastest Delivery</div>
-                    <div class="summary-value">${Helpers.escapeHtml(fastestDelivery.delivery_time || fastestDelivery.lead_time || 'N/A')}</div>
-                    <div class="summary-subtext">${Helpers.escapeHtml(fastestDelivery.supplier_name || '')}</div>
-                </div>
-                ` : ''}
-            `;
-        }
-        if (summarySection) {
-            Helpers.showElement(summarySection);
-        }
-    } else {
-        if (summarySection) {
-            Helpers.hideElement(summarySection);
-        }
+    // Create quotes table section
+    if (quotes_received.length > 0) {
+        const quotesSection = document.createElement('div');
+        quotesSection.className = 'quotes-section';
+        quotesSection.innerHTML = '<h3>Quotes Received</h3>';
+        
+        const quotesTable = createQuotesTable(quotes_received);
+        quotesSection.appendChild(quotesTable);
+        container.appendChild(quotesSection);
     }
+    
+    // Show pending suppliers if any
+    if (suppliers_without_quotes.length > 0) {
+        const pendingSection = document.createElement('div');
+        pendingSection.className = 'pending-section';
+        pendingSection.innerHTML = `
+            <h3>Awaiting Response From</h3>
+            <ul class="pending-list">
+                ${suppliers_without_quotes.map(name => 
+                    `<li>${Helpers.escapeHtml(name)}</li>`
+                ).join('')}
+            </ul>
+        `;
+        container.appendChild(pendingSection);
+    }
+}
+
+/**
+ * Create a table to display quotes
+ * @param {Array} quotes - Array of quote objects
+ * @returns {HTMLElement} Table element
+ */
+function createQuotesTable(quotes) {
+    const table = document.createElement('table');
+    table.className = 'quotes-table';
+    
+    // Header
+    const thead = document.createElement('thead');
+    thead.innerHTML = `
+        <tr>
+            <th>Supplier</th>
+            <th>Price</th>
+            <th>Currency</th>
+            <th>Delivery Time</th>
+            <th>Quote Date</th>
+            <th>Status</th>
+        </tr>
+    `;
+    table.appendChild(thead);
+    
+    // Body
+    const tbody = document.createElement('tbody');
+    quotes.forEach(quote => {
+        const row = document.createElement('tr');
+        const quoteDate = quote.quote_date 
+            ? new Date(quote.quote_date).toLocaleDateString() 
+            : 'N/A';
+        const price = quote.price 
+            ? (typeof quote.price === 'number' ? quote.price.toFixed(2) : quote.price)
+            : 'N/A';
+        
+        row.innerHTML = `
+            <td>${Helpers.escapeHtml(quote.supplier_name || 'N/A')}</td>
+            <td>${price !== 'N/A' ? `$${price}` : 'N/A'}</td>
+            <td>${Helpers.escapeHtml(quote.currency || 'N/A')}</td>
+            <td>${Helpers.escapeHtml(quote.delivery_time || 'N/A')}</td>
+            <td>${quoteDate}</td>
+            <td><span class="status-badge">${Helpers.escapeHtml(quote.status || 'received')}</span></td>
+        `;
+        tbody.appendChild(row);
+    });
+    
+    table.appendChild(tbody);
+    return table;
 }
 
 // ==================== QUOTE COMPARISON MODAL ====================
