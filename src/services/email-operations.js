@@ -784,20 +784,34 @@ const EmailOperations = {
             body: JSON.stringify(message)
         });
 
+        // #region agent log
+        fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'email-operations.js:787',message:'saveDraft called with attachments check',data:{hasAttachments:!!options.attachments,isArray:Array.isArray(options.attachments),attachmentsLength:options.attachments?.length,draftId:draft.id},timestamp:Date.now(),sessionId:'debug-session',runId:'run3',hypothesisId:'F'})}).catch(()=>{});
+        // #endregion
+        
         // Add attachments if provided
         if (options.attachments && Array.isArray(options.attachments) && options.attachments.length > 0) {
             console.log(`Adding ${options.attachments.length} attachment(s) to draft ${draft.id}`);
             console.log('Attachment details:', options.attachments.map(a => ({ name: a.name, hasContent: !!a.contentBytes })));
+            
+            // #region agent log
+            fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'email-operations.js:788',message:'Starting attachment upload to draft',data:{draftId:draft.id,attachmentsCount:options.attachments.length,attachments:options.attachments.map(a=>({name:a.name,hasContentBytes:!!a.contentBytes,contentBytesLength:a.contentBytes?.length,contentType:a.contentType}))},timestamp:Date.now(),sessionId:'debug-session',runId:'run3',hypothesisId:'F'})}).catch(()=>{});
+            // #endregion
             
             for (let i = 0; i < options.attachments.length; i++) {
                 const attachment = options.attachments[i];
                 try {
                     // Validate attachment has required fields
                     if (!attachment.contentBytes || attachment.contentBytes.length === 0) {
+                        // #region agent log
+                        fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'email-operations.js:796',message:'Attachment validation failed - no contentBytes',data:{attachmentName:attachment.name,draftId:draft.id},timestamp:Date.now(),sessionId:'debug-session',runId:'run3',hypothesisId:'F'})}).catch(()=>{});
+                        // #endregion
                         throw new Error(`Attachment ${attachment.name} has no contentBytes`);
                     }
                     
                     if (!attachment.name) {
+                        // #region agent log
+                        fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'email-operations.js:801',message:'Attachment validation failed - no name',data:{draftId:draft.id},timestamp:Date.now(),sessionId:'debug-session',runId:'run3',hypothesisId:'F'})}).catch(()=>{});
+                        // #endregion
                         throw new Error(`Attachment missing name`);
                     }
                     
@@ -812,11 +826,19 @@ const EmailOperations = {
                     console.log(`[saveDraft] Uploading attachment ${i + 1}/${options.attachments.length}: ${attachment.name}`);
                     console.log(`[saveDraft] Content size: ${attachmentPayload.contentBytes.length} base64 chars`);
                     
+                    // #region agent log
+                    fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'email-operations.js:812',message:'Uploading attachment to Graph API',data:{draftId:draft.id,attachmentName:attachment.name,contentBytesLength:attachmentPayload.contentBytes.length,contentType:attachmentPayload.contentType,attachmentIndex:i+1,totalAttachments:options.attachments.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run3',hypothesisId:'F'})}).catch(()=>{});
+                    // #endregion
+                    
                     // Upload attachment to the draft
                     const result = await AuthService.graphRequest(`/me/messages/${draft.id}/attachments`, {
                         method: 'POST',
                         body: JSON.stringify(attachmentPayload)
                     });
+                    
+                    // #region agent log
+                    fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'email-operations.js:820',message:'Attachment upload successful',data:{draftId:draft.id,attachmentName:attachment.name,result:result},timestamp:Date.now(),sessionId:'debug-session',runId:'run3',hypothesisId:'F'})}).catch(()=>{});
+                    // #endregion
                     
                     console.log(`[saveDraft] ✓ Successfully attached ${attachment.name} to draft ${draft.id}`);
                     
@@ -825,6 +847,9 @@ const EmailOperations = {
                         await new Promise(resolve => setTimeout(resolve, 200));
                     }
                 } catch (attachmentError) {
+                    // #region agent log
+                    fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'email-operations.js:827',message:'Attachment upload failed',data:{draftId:draft.id,attachmentName:attachment.name,errorMessage:attachmentError.message,errorName:attachmentError.name,errorStack:attachmentError.stack,hasContentBytes:!!attachment.contentBytes,contentBytesLength:attachment.contentBytes?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run3',hypothesisId:'F'})}).catch(()=>{});
+                    // #endregion
                     console.error(`[saveDraft] ✗ CRITICAL: Failed to attach ${attachment.name}:`, attachmentError);
                     console.error('[saveDraft] Error details:', {
                         message: attachmentError.message,
@@ -843,10 +868,18 @@ const EmailOperations = {
                 const verifyDraft = await AuthService.graphRequest(`/me/messages/${draft.id}?$expand=attachments&$select=id,subject,attachments`);
                 const attachmentCount = verifyDraft.attachments ? verifyDraft.attachments.length : 0;
                 console.log(`✓ Draft ${draft.id} now has ${attachmentCount} attachment(s)`);
+                
+                // #region agent log
+                fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'email-operations.js:844',message:'Attachment verification result',data:{draftId:draft.id,expectedCount:options.attachments.length,actualCount:attachmentCount,attachments:verifyDraft.attachments?.map(a=>({name:a.name,size:a.size}))},timestamp:Date.now(),sessionId:'debug-session',runId:'run3',hypothesisId:'F'})}).catch(()=>{});
+                // #endregion
+                
                 if (attachmentCount === 0) {
                     console.warn('⚠ WARNING: Draft was created but no attachments were found. This may indicate an upload failure.');
                 }
             } catch (verifyError) {
+                // #region agent log
+                fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'email-operations.js:850',message:'Attachment verification failed',data:{draftId:draft.id,errorMessage:verifyError.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run3',hypothesisId:'F'})}).catch(()=>{});
+                // #endregion
                 console.warn('Could not verify attachments:', verifyError);
             }
         }
