@@ -211,18 +211,6 @@ function normalizeMatch(s) {
 }
 
 /**
- * Extract email from "Name <email>" or return trimmed string.
- * @param {string} s
- * @returns {string}
- */
-function extractEmail(s) {
-    if (!s || typeof s !== 'string') return '';
-    const t = s.trim();
-    const m = t.match(/<([^>]+)>/);
-    return m ? m[1].trim() : t;
-}
-
-/**
  * Find RFQ matching draft by subject + recipient. Uses getRFQs().
  * Matching order: exact, normalized, subject-only (prefer recipient), subject-contains (prefer recipient).
  * Returns null if no match or matched RFQ lacks rfq_id/supplier_id.
@@ -242,36 +230,32 @@ function findMatchingRFQ(draft) {
 
     const hasIds = (r) => r && r.rfq_id && r.supplier_id;
     const eq = (a, b) => normalizeMatch(a) === normalizeMatch(b);
-    const eqEmail = (a, b) => normalizeMatch(extractEmail(a)) === normalizeMatch(extractEmail(b));
 
     // 1. Exact
     let match = rfqs.find(rfq =>
-        rfq.subject === subject && eqEmail(rfq.supplier_email, recipient)
+        rfq.subject === subject && eq(rfq.supplier_email, recipient)
     );
     if (hasIds(match)) return match;
 
     // 2. Normalized
     match = rfqs.find(rfq =>
-        normalizeMatch(rfq.subject) === nSub && eqEmail(rfq.supplier_email, recipient)
+        normalizeMatch(rfq.subject) === nSub && eq(rfq.supplier_email, recipient)
     );
     if (hasIds(match)) return match;
 
-    // 3. Subject-only; prefer recipient match. If multiple RFQs share subject, never pick "first" without recipient match.
+    // 3. Subject-only; prefer recipient match
     const bySubject = rfqs.filter(rfq => normalizeMatch(rfq.subject) === nSub);
-    match = bySubject.find(rfq => eqEmail(rfq.supplier_email, recipient)) || (bySubject.length === 1 ? bySubject[0] : null);
+    match = bySubject.find(rfq => eq(rfq.supplier_email, recipient)) || bySubject[0];
     if (hasIds(match)) return match;
 
-    // 4. Subject contains; prefer recipient match. Same rule: no "first" when multiple, no recipient match.
+    // 4. Subject contains; prefer recipient match
     const byContains = rfqs.filter(rfq => {
         const nr = normalizeMatch(rfq.subject);
         return (nSub && nr && (nSub.includes(nr) || nr.includes(nSub)));
     });
-    match = byContains.find(rfq => eqEmail(rfq.supplier_email, recipient)) || (byContains.length === 1 ? byContains[0] : null);
+    match = byContains.find(rfq => eq(rfq.supplier_email, recipient)) || byContains[0];
     if (hasIds(match)) return match;
 
-    if (bySubject.length > 1) {
-        console.warn(`findMatchingRFQ: ${bySubject.length} RFQs with same subject, no recipient match for "${recipient}" — cannot pick supplier`);
-    }
     return null;
 }
 
