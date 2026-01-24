@@ -35,6 +35,7 @@ const AppState = {
 
 // ==================== STATE PERSISTENCE ====================
 const STATE_KEY = 'procurement_addin_state';
+const RFQS_KEY = 'procurement_rfqs';
 
 function persistState(state) {
     try {
@@ -180,6 +181,82 @@ if (typeof window !== 'undefined') {
         getFromEmail: getRFQMappingFromEmail,
         store: storeRFQMapping
     };
+}
+
+/**
+ * Get RFQs for matching (AppState first, then localStorage fallback).
+ * Used by findMatchingRFQ and matching logic so RFQs survive refresh.
+ * @returns {Array} RFQ objects from generate or []
+ */
+function getRFQs() {
+    if (AppState.rfqs && AppState.rfqs.length > 0) {
+        return AppState.rfqs;
+    }
+    try {
+        const stored = localStorage.getItem(RFQS_KEY);
+        return stored ? JSON.parse(stored) : [];
+    } catch (e) {
+        console.warn('Failed to parse stored RFQs:', e);
+        return [];
+    }
+}
+
+/**
+ * Normalize string for matching: trim, lowercase, collapse spaces.
+ * @param {string} s
+ * @returns {string}
+ */
+function normalizeMatch(s) {
+    return (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+/**
+ * Find RFQ matching draft by subject + recipient. Uses getRFQs().
+ * Matching order: exact, normalized, subject-only (prefer recipient), subject-contains (prefer recipient).
+ * Returns null if no match or matched RFQ lacks rfq_id/supplier_id.
+ * @param {{ subject: string, toRecipients?: Array<{ emailAddress?: { address?: string } }>, recipient?: string }} draft - Draft or { subject, recipient }
+ * @returns {Object|null} Matched RFQ or null
+ */
+function findMatchingRFQ(draft) {
+    const subject = (draft.subject || '').trim();
+    const recipient = draft.recipient != null
+        ? (draft.recipient || '').trim()
+        : (draft.toRecipients?.[0]?.emailAddress?.address || '').trim();
+    const rfqs = getRFQs();
+    if (!rfqs.length) return null;
+
+    const nSub = normalizeMatch(subject);
+    const nRec = normalizeMatch(recipient);
+
+    const hasIds = (r) => r && r.rfq_id && r.supplier_id;
+    const eq = (a, b) => normalizeMatch(a) === normalizeMatch(b);
+
+    // 1. Exact
+    let match = rfqs.find(rfq =>
+        rfq.subject === subject && eq(rfq.supplier_email, recipient)
+    );
+    if (hasIds(match)) return match;
+
+    // 2. Normalized
+    match = rfqs.find(rfq =>
+        normalizeMatch(rfq.subject) === nSub && eq(rfq.supplier_email, recipient)
+    );
+    if (hasIds(match)) return match;
+
+    // 3. Subject-only; prefer recipient match
+    const bySubject = rfqs.filter(rfq => normalizeMatch(rfq.subject) === nSub);
+    match = bySubject.find(rfq => eq(rfq.supplier_email, recipient)) || bySubject[0];
+    if (hasIds(match)) return match;
+
+    // 4. Subject contains; prefer recipient match
+    const byContains = rfqs.filter(rfq => {
+        const nr = normalizeMatch(rfq.subject);
+        return (nSub && nr && (nSub.includes(nr) || nr.includes(nSub)));
+    });
+    match = byContains.find(rfq => eq(rfq.supplier_email, recipient)) || byContains[0];
+    if (hasIds(match)) return match;
+
+    return null;
 }
 
 function getPersistedState() {
@@ -3313,9 +3390,12 @@ async function sendDraftEmailWithFullWorkflow(draft) {
     
     console.log(`=== Sending draft: ${subject} to ${recipient} ===`);
     console.log(`Material code: ${materialCode}`);
-    
-    // Delete the draft first (to avoid duplicates), then send via sendEmail
-    // Actually, we need to send the draft itself via Graph API, not create a new email
+
+    // Match RFQ before send (use robust matching; store mapping after we have internetMessageId)
+    const matchedRfq = findMatchingRFQ(draft);
+    if (!matchedRfq) {
+        console.warn(`No RFQ match for draft: ${subject} to ${recipient}`);
+    }
     
     // Step 1: Send the draft via Graph API
     console.log(`Sending draft ${draft.id}...`);
@@ -3412,30 +3492,18 @@ async function sendDraftEmailWithFullWorkflow(draft) {
     
     console.log(`Sent email ID: ${fullSentEmail.id}, conversationId: ${conversationId}, internetMessageId: ${internetMessageId}, sentDateTime: ${sentDateTime}`);
     
-    // Store RFQ mapping if we can find the corresponding RFQ
+    // Store RFQ mapping from pre-send match (matchedRfq)
     if (internetMessageId) {
         try {
-            // Find RFQ from AppState.rfqs by matching subject and recipient
-            const matchingRfq = AppState.rfqs?.find(rfq => {
-                const subjectMatch = rfq.subject === subject;
-                const recipientMatch = rfq.supplier_email?.toLowerCase() === recipient.toLowerCase();
-                return subjectMatch && recipientMatch;
-            });
-            
-            if (matchingRfq && matchingRfq.rfq_id && matchingRfq.supplier_id) {
+            if (matchedRfq && matchedRfq.rfq_id && matchedRfq.supplier_id) {
                 storeRFQMapping(internetMessageId, {
-                    rfq_id: matchingRfq.rfq_id,
-                    supplier_id: matchingRfq.supplier_id,
-                    supplier_name: matchingRfq.supplier_name,
-                    supplier_email: matchingRfq.supplier_email || recipient
+                    rfq_id: matchedRfq.rfq_id,
+                    supplier_id: matchedRfq.supplier_id,
+                    supplier_name: matchedRfq.supplier_name,
+                    supplier_email: matchedRfq.supplier_email || recipient
                 }, sentDateTime);
             } else {
-                console.warn(`Could not find RFQ match for sent email: ${subject} to ${recipient}`);
-                console.warn('Available RFQs:', AppState.rfqs?.map(r => ({ 
-                    subject: r.subject, 
-                    supplier_email: r.supplier_email,
-                    rfq_id: r.rfq_id 
-                })));
+                console.warn(`Could not store RFQ mapping for sent email: ${subject} to ${recipient} (no match or missing rfq_id/supplier_id)`);
             }
         } catch (mappingError) {
             console.error('Error storing RFQ mapping:', mappingError);
@@ -3477,8 +3545,20 @@ async function sendDraftEmailWithFullWorkflow(draft) {
         try {
             const userEmail = Office.context.mailbox.userProfile?.emailAddress;
             if (userEmail) {
-                // Get RFQ mapping to include supplier info
-                const rfqMapping = getRFQMapping(internetMessageId);
+                // Resolve mapping: stored first, then fallback match by subject + recipient
+                let rfqMapping = getRFQMapping(internetMessageId);
+                if (!rfqMapping) {
+                    const fallbackRfq = findMatchingRFQ({ subject, recipient });
+                    if (fallbackRfq) {
+                        storeRFQMapping(internetMessageId, {
+                            rfq_id: fallbackRfq.rfq_id,
+                            supplier_id: fallbackRfq.supplier_id,
+                            supplier_name: fallbackRfq.supplier_name,
+                            supplier_email: fallbackRfq.supplier_email || recipient
+                        }, sentDateTime);
+                        rfqMapping = getRFQMapping(internetMessageId);
+                    }
+                }
                 
                 const quantityMatch = subject.match(/(\d+)\s*pcs/i);
                 const quantity = quantityMatch ? parseInt(quantityMatch[1]) : 100;
@@ -3494,15 +3574,18 @@ async function sendDraftEmailWithFullWorkflow(draft) {
                     quantity: quantity
                 };
                 
-                // Add supplier info if mapping exists
-                if (rfqMapping) {
+                if (rfqMapping?.supplier_id) {
                     autoReplyOptions.supplierId = rfqMapping.supplier_id;
                     autoReplyOptions.supplierName = rfqMapping.supplier_name;
-                    console.log(`  Including supplier info: ${rfqMapping.supplier_name} (${rfqMapping.supplier_id})`);
                 } else {
-                    console.warn(`  No RFQ mapping found for ${internetMessageId} - supplier info will be missing`);
+                    console.warn(`  No RFQ mapping for ${internetMessageId} - supplier_id/supplier_name will be missing`);
                 }
                 
+                console.log('Sending schedule-reply with:', {
+                    supplier_id: autoReplyOptions.supplierId ?? null,
+                    supplier_name: autoReplyOptions.supplierName ?? null,
+                    subject: autoReplyOptions.subject
+                });
                 await ApiClient.scheduleAutoReply(autoReplyOptions);
                 
                 console.log(`✓ Auto-reply scheduled (will arrive in ~5 seconds)`);
@@ -4881,11 +4964,17 @@ async function handlePRSelect(pr) {
     // Reset button state
     updateGenerateRFQsStep();
     
-    // Persist the selection
+    // Persist the selection and clear RFQs (new PR = new RFQs)
+    try {
+        localStorage.setItem(RFQS_KEY, '[]');
+    } catch (e) {
+        console.warn('Failed to clear stored RFQs:', e);
+    }
     persistState({ 
         selectedPR: pr,
         prs: AppState.prs,
-        currentStep: 'suppliers'
+        currentStep: 'suppliers',
+        rfqs: []
     });
     
     // Update PR details in modal
@@ -5643,7 +5732,13 @@ async function handleGenerateRFQs() {
         }
         
         AppState.rfqs = rfqs;
-        
+        persistState({ rfqs });
+        try {
+            localStorage.setItem(RFQS_KEY, JSON.stringify(rfqs));
+        } catch (e) {
+            console.warn('Failed to persist RFQs to localStorage:', e);
+        }
+
         // #region agent log
         fetch('http://127.0.0.1:7248/ingest/c8aaba02-7147-41b9-988d-15ca39db2160',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'taskpane.js:5073',message:'RFQs stored in AppState',data:{appStateRfqsLength:AppState.rfqs.length,firstRfqInAppState:AppState.rfqs[0],firstRfqAttachments:AppState.rfqs[0]?.attachments,firstRfqAttachmentsLength:AppState.rfqs[0]?.attachments?.length,firstRfqAttachmentsType:typeof AppState.rfqs[0]?.attachments},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
         // #endregion
