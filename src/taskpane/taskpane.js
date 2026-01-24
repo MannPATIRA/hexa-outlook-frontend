@@ -3391,12 +3391,22 @@ async function sendDraftEmailWithFullWorkflow(draft) {
     console.log(`=== Sending draft: ${subject} to ${recipient} ===`);
     console.log(`Material code: ${materialCode}`);
 
-    // Match RFQ before send (use robust matching; store mapping after we have internetMessageId)
-    const matchedRfq = findMatchingRFQ(draft);
+    // Match RFQ before send: prefer draft-ID lookup (we set rfq.draftId when creating drafts), else subject+recipient
+    let matchedRfq = null;
+    if (draft.id) {
+        const byDraftId = getRFQs().find(rfq => rfq.draftId === draft.id);
+        if (byDraftId && byDraftId.rfq_id && byDraftId.supplier_id) {
+            matchedRfq = byDraftId;
+            console.log(`  Matched RFQ by draft ID: ${byDraftId.supplier_name} (${byDraftId.supplier_id})`);
+        }
+    }
+    if (!matchedRfq) {
+        matchedRfq = findMatchingRFQ(draft);
+    }
     if (!matchedRfq) {
         console.warn(`No RFQ match for draft: ${subject} to ${recipient}`);
     }
-    
+
     // Step 1: Send the draft via Graph API
     console.log(`Sending draft ${draft.id}...`);
     await AuthService.graphRequest(`/me/messages/${draft.id}/send`, {
