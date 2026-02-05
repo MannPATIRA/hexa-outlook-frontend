@@ -28,6 +28,18 @@ const Config = {
         ENGINEER_RESPONSE: 'Engineer Response'
     },
 
+    // Folder-based category definitions for email tagging
+    // Each folder maps to a category name and color preset
+    // Colors: Preset0=Red, Preset1=Orange, Preset3=Yellow, Preset4=Green, Preset5=Teal, Preset7=Blue, Preset8=Purple
+    FOLDER_CATEGORIES: {
+        'Sent RFQs': { name: 'Sent RFQ', color: 'Preset7' },                          // Blue
+        'Quotes': { name: 'Quote', color: 'Preset4' },                                 // Green
+        'Clarification Requests': { name: 'Clarification', color: 'Preset3' },         // Yellow
+        'Awaiting Clarification Response': { name: 'Awaiting Response', color: 'Preset1' },  // Orange
+        'Awaiting Engineer Response': { name: 'Awaiting Engineer', color: 'Preset8' },       // Purple
+        'Engineer Response': { name: 'Engineer Response', color: 'Preset5' }           // Teal
+    },
+
     // Local storage keys
     STORAGE_KEYS: {
         API_URL: 'procurement_api_url',

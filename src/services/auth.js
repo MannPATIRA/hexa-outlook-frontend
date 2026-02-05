@@ -22,7 +22,8 @@ const AuthService = {
         'User.Read',
         'Mail.ReadWrite',
         'Mail.Send',
-        'MailboxFolder.ReadWrite'
+        'MailboxFolder.ReadWrite',
+        'MailboxSettings.ReadWrite'  // Required for creating/managing email categories
     ],
 
     // MSAL instance

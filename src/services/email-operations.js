@@ -381,7 +381,8 @@ const EmailOperations = {
                         throw folderError; // Re-throw so we know folder creation failed
                     }
 
-                    // Move to Sent RFQs folder FIRST
+                    // Move to Sent RFQs folder
+                    // The folder category tag is automatically applied by moveEmailToFolder
                     const folderPath = `${options.materialCode}/${Config.FOLDERS.SENT_RFQS}`;
                     console.log(`Attempting to move email to: ${folderPath}`);
                     let movedEmailId = sentEmailId;
@@ -391,38 +392,7 @@ const EmailOperations = {
                         
                         // Use the email ID from move result if available, otherwise use original
                         movedEmailId = moveResult?.id || sentEmailId;
-                        console.log(`Moved email ID: ${movedEmailId}`);
-                        
-                        // Wait a moment for the move to complete
-                        await new Promise(resolve => setTimeout(resolve, 1000));
-                        
-                        // Apply "SENT RFQ" category tag to the email AFTER moving
-                        // This ensures the category is applied to the email in its final location
-                        try {
-                            console.log(`Applying SENT RFQ category to moved email ${movedEmailId}...`);
-                            await this.applyCategoryToEmail(movedEmailId, 'SENT RFQ');
-                            console.log(`✓ Successfully applied SENT RFQ category to email ${movedEmailId}`);
-                            
-                            // Verify the category was applied by checking again
-                            await new Promise(resolve => setTimeout(resolve, 500));
-                            const verifyEmail = await AuthService.graphRequest(`/me/messages/${movedEmailId}?$select=id,categories`);
-                            if (verifyEmail.categories && verifyEmail.categories.some(cat => 
-                                cat.toLowerCase().includes('sent rfq')
-                            )) {
-                                console.log(`✓ Category verified on email ${movedEmailId}:`, verifyEmail.categories);
-                            } else {
-                                console.warn(`⚠ Category not found after verification. Retrying...`);
-                                // Retry once more
-                                await this.applyCategoryToEmail(movedEmailId, 'SENT RFQ');
-                            }
-                        } catch (categoryError) {
-                            console.error('Failed to apply category (non-critical):', categoryError);
-                            console.error('Category error details:', {
-                                emailId: movedEmailId,
-                                error: categoryError.message
-                            });
-                            // Don't fail the operation if category fails, but log it
-                        }
+                        console.log(`Moved email ID: ${movedEmailId} (folder category auto-applied)`);
                     } catch (moveError) {
                         console.error('✗ Failed to move email:', moveError);
                         console.error('Move error details:', {
@@ -1506,6 +1476,235 @@ const EmailOperations = {
         } catch (error) {
             console.error('Error getting email chain:', error);
             return [];
+        }
+    }
+};
+
+/**
+ * Folder Category Service
+ * Manages email categories/tags based on folder location
+ * When an email is moved to a folder, it automatically gets tagged with the folder's category
+ */
+const FolderCategoryService = {
+    // Track if categories have been initialized this session
+    categoriesInitialized: false,
+    
+    // Cache to avoid redundant PATCH requests
+    // Maps emailId -> categoryName
+    messageCategoryCache: {},
+
+    /**
+     * Get array of all folder category names
+     * Used to identify which categories belong to this system
+     */
+    getFolderCategoryNames() {
+        if (!Config.FOLDER_CATEGORIES) return [];
+        return Object.values(Config.FOLDER_CATEGORIES).map(cat => cat.name);
+    },
+
+    /**
+     * Get the category definition for a folder name
+     * @param {string} folderName - The folder name (e.g., "Sent RFQs", "Quotes")
+     * @returns {object|null} Category definition with name and color, or null if not found
+     */
+    getCategoryForFolder(folderName) {
+        if (!Config.FOLDER_CATEGORIES || !folderName) return null;
+        return Config.FOLDER_CATEGORIES[folderName] || null;
+    },
+
+    /**
+     * Ensure all folder categories exist in the user's master category list
+     * Should be called once after sign-in
+     */
+    async ensureFolderCategoriesExist() {
+        if (this.categoriesInitialized) {
+            console.log('Folder categories already initialized this session');
+            return;
+        }
+
+        if (!AuthService.isSignedIn()) {
+            console.log('Cannot initialize categories - user not signed in');
+            return;
+        }
+
+        try {
+            console.log('Initializing folder categories...');
+            
+            // Get current master categories
+            const response = await AuthService.graphRequest('/me/outlook/masterCategories');
+            const existingCategories = response.value || [];
+            
+            // Create a map of existing categories by name (case-insensitive)
+            const existingByName = {};
+            existingCategories.forEach(cat => {
+                if (cat.displayName) {
+                    existingByName[cat.displayName.toLowerCase()] = cat;
+                }
+            });
+
+            // Ensure each folder category exists with correct color
+            for (const folderName in Config.FOLDER_CATEGORIES) {
+                const catDef = Config.FOLDER_CATEGORIES[folderName];
+                const existingCat = existingByName[catDef.name.toLowerCase()];
+
+                if (!existingCat) {
+                    // Create new category
+                    try {
+                        await AuthService.graphRequest('/me/outlook/masterCategories', {
+                            method: 'POST',
+                            body: JSON.stringify({
+                                displayName: catDef.name,
+                                color: catDef.color
+                            })
+                        });
+                        console.log(`Created folder category: "${catDef.name}" (${catDef.color})`);
+                    } catch (createError) {
+                        // Category might already exist with different casing
+                        console.warn(`Could not create category "${catDef.name}":`, createError.message);
+                    }
+                } else {
+                    // Update color if needed
+                    try {
+                        await AuthService.graphRequest(
+                            `/me/outlook/masterCategories/${encodeURIComponent(existingCat.id)}`,
+                            {
+                                method: 'PATCH',
+                                body: JSON.stringify({ color: catDef.color })
+                            }
+                        );
+                        console.log(`Updated color for category: "${catDef.name}" (${catDef.color})`);
+                    } catch (updateError) {
+                        console.warn(`Could not update category "${catDef.name}":`, updateError.message);
+                    }
+                }
+            }
+
+            this.categoriesInitialized = true;
+            console.log('Folder categories initialized successfully');
+        } catch (error) {
+            console.error('Error initializing folder categories:', error);
+        }
+    },
+
+    /**
+     * Set folder category on an email
+     * Removes any existing folder categories and applies the new one
+     * @param {string} emailId - The email ID (Graph API format)
+     * @param {string} folderName - The folder name to tag the email with
+     */
+    async setFolderCategory(emailId, folderName) {
+        if (!emailId || !folderName) {
+            console.warn('setFolderCategory: Missing emailId or folderName');
+            return;
+        }
+
+        if (!AuthService.isSignedIn()) {
+            console.warn('setFolderCategory: User not signed in');
+            return;
+        }
+
+        const catDef = this.getCategoryForFolder(folderName);
+        if (!catDef) {
+            console.log(`No category defined for folder: "${folderName}"`);
+            return;
+        }
+
+        // Check cache to avoid redundant updates
+        if (this.messageCategoryCache[emailId] === catDef.name) {
+            console.log(`Email ${emailId} already has category "${catDef.name}" (cached)`);
+            return;
+        }
+
+        try {
+            // Get current categories on the email
+            const email = await AuthService.graphRequest(
+                `/me/messages/${encodeURIComponent(emailId)}?$select=id,categories`
+            );
+            const currentCategories = (email && email.categories) || [];
+
+            // Get all folder category names to filter out
+            const folderCategoryNames = this.getFolderCategoryNames();
+
+            // Remove all folder categories, keep other categories (user's tags, etc.)
+            const filteredCategories = currentCategories.filter(cat => {
+                return !folderCategoryNames.includes(cat);
+            });
+
+            // Add the new folder category
+            filteredCategories.push(catDef.name);
+
+            // Update the email
+            await AuthService.graphRequest(
+                `/me/messages/${encodeURIComponent(emailId)}`,
+                {
+                    method: 'PATCH',
+                    body: JSON.stringify({ categories: filteredCategories })
+                }
+            );
+
+            // Update cache
+            this.messageCategoryCache[emailId] = catDef.name;
+            
+            console.log(`Set folder category "${catDef.name}" on email ${emailId}`);
+        } catch (error) {
+            console.error(`Error setting folder category on email ${emailId}:`, error);
+            // Don't throw - category failure shouldn't break email operations
+        }
+    },
+
+    /**
+     * Remove all folder categories from an email
+     * Preserves user-applied and other categories
+     * @param {string} emailId - The email ID (Graph API format)
+     */
+    async removeFolderCategories(emailId) {
+        if (!emailId || !AuthService.isSignedIn()) return;
+
+        try {
+            // Get current categories
+            const email = await AuthService.graphRequest(
+                `/me/messages/${encodeURIComponent(emailId)}?$select=id,categories`
+            );
+            const currentCategories = (email && email.categories) || [];
+
+            // Get folder category names to remove
+            const folderCategoryNames = this.getFolderCategoryNames();
+
+            // Filter out folder categories
+            const filteredCategories = currentCategories.filter(cat => {
+                return !folderCategoryNames.includes(cat);
+            });
+
+            // Only update if something changed
+            if (filteredCategories.length !== currentCategories.length) {
+                await AuthService.graphRequest(
+                    `/me/messages/${encodeURIComponent(emailId)}`,
+                    {
+                        method: 'PATCH',
+                        body: JSON.stringify({ categories: filteredCategories })
+                    }
+                );
+                console.log(`Removed folder categories from email ${emailId}`);
+            }
+
+            // Clear cache
+            delete this.messageCategoryCache[emailId];
+        } catch (error) {
+            console.error(`Error removing folder categories from email ${emailId}:`, error);
+        }
+    },
+
+    /**
+     * Clear the message category cache
+     * Call when user signs out or as needed
+     * @param {string} emailId - Optional specific email ID to clear, or clears all if omitted
+     */
+    clearCache(emailId) {
+        if (emailId) {
+            delete this.messageCategoryCache[emailId];
+        } else {
+            this.messageCategoryCache = {};
+            this.categoriesInitialized = false;
         }
     }
 };

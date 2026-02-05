@@ -3530,19 +3530,12 @@ async function sendDraftEmailWithFullWorkflow(draft) {
             console.log(`✓ Folder structure ready`);
             
             // Move to Sent RFQs folder
+            // The folder category tag is automatically applied by moveEmailToFolder
             const folderPath = `${materialCode}/${Config.FOLDERS.SENT_RFQS}`;
             console.log(`Moving email to ${folderPath}...`);
             const moveResult = await FolderManagement.moveEmailToFolder(fullSentEmail.id, folderPath);
             movedEmailId = moveResult?.id || fullSentEmail.id;
-            console.log(`✓ Moved email to ${folderPath}`);
-            
-            // Wait for move to complete
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            
-            // Apply category to the moved email
-            console.log(`Applying SENT RFQ category...`);
-            await EmailOperations.applyCategoryToEmail(movedEmailId, 'SENT RFQ', 'Preset6');
-            console.log(`✓ Category applied`);
+            console.log(`✓ Moved email to ${folderPath} (folder category auto-applied)`);
         } catch (folderError) {
             console.error('Error with folder/category operations:', folderError);
             // Continue even if folder operations fail
@@ -4365,8 +4358,10 @@ async function initializeAuth() {
         const initialized = await AuthService.initialize();
         if (initialized) {
             updateAuthUI();
-            // Start email monitoring if signed in
+            // Initialize folder categories and start email monitoring if signed in
             if (AuthService.isSignedIn()) {
+                // Ensure folder categories exist with correct colors
+                await FolderCategoryService.ensureFolderCategoriesExist();
                 EmailMonitor.startMonitoring();
             }
         }
@@ -4406,6 +4401,10 @@ async function handleSignIn() {
         await AuthService.signIn();
         updateAuthUI();
         
+        // Initialize folder categories after sign-in
+        // This ensures all folder tags exist with correct colors
+        await FolderCategoryService.ensureFolderCategoriesExist();
+        
         // Start email monitoring after sign-in
         EmailMonitor.startMonitoring();
         
@@ -4426,6 +4425,7 @@ async function handleSignOut() {
         await AuthService.signOut();
         updateAuthUI();
         FolderManagement.clearCache();
+        FolderCategoryService.clearCache();  // Clear category cache on sign-out
         Helpers.showSuccess('Signed out');
     } catch (error) {
         console.error('Sign out error:', error);
@@ -5763,13 +5763,13 @@ async function handleGenerateRFQs() {
         }
         
         // Enable the Review & Send RFQs step
-        const reviewStep = document.getElementById('step-review-rfqs');
-        if (reviewStep) {
-            Helpers.enableStep(reviewStep);
-        }
+        // const reviewStep = document.getElementById('step-review-rfqs');
+        // if (reviewStep) {
+        //    Helpers.enableStep(reviewStep);
+        // }
         
         // Render RFQ cards in the review step
-        renderRFQCards(rfqs);
+        // renderRFQCards(rfqs);
         
         Helpers.showSuccess(`${rfqs.length} RFQ(s) generated successfully`);
     } catch (error) {

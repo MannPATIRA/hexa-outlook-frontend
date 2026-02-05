@@ -128,6 +128,7 @@ const FolderManagement = {
 
     /**
      * Move an email to a specific folder
+     * Automatically applies the folder's category tag after successful move
      */
     async moveEmailToFolder(emailId, folderPath) {
         if (!AuthService.isSignedIn()) {
@@ -155,6 +156,22 @@ const FolderManagement = {
             });
 
             console.log(`Successfully moved email ${emailId} to ${folderPath} (folder ID: ${folderId})`);
+
+            // Apply folder category tag after successful move
+            // Extract the folder name from the path (last segment)
+            const folderName = folderPath.split('/').pop();
+            if (folderName && Config.FOLDER_CATEGORIES && Config.FOLDER_CATEGORIES[folderName]) {
+                try {
+                    // Use the new email ID from the move result
+                    const movedEmailId = result && result.id ? result.id : emailId;
+                    await FolderCategoryService.setFolderCategory(movedEmailId, folderName);
+                    console.log(`Applied folder category "${folderName}" to email after move`);
+                } catch (categoryError) {
+                    // Don't fail the move if category application fails
+                    console.warn('Could not apply folder category after move:', categoryError.message);
+                }
+            }
+
             return result;
         } catch (error) {
             console.error('Error moving email:', error);

@@ -637,52 +637,22 @@ const EmailMonitor = {
             }
 
             // Step 7: Move email to appropriate folder
+            // The folder category tag is automatically applied by moveEmailToFolder
             this.log('Step 7: Moving email to folder...');
+            let movedEmailId = email.id;
             try {
-                await FolderManagement.moveEmailToFolder(email.id, targetFolder);
-                this.logSuccess(`Moved email to ${targetFolder}`);
+                const moveResult = await FolderManagement.moveEmailToFolder(email.id, targetFolder);
+                movedEmailId = moveResult?.id || email.id;
+                this.logSuccess(`Moved email to ${targetFolder} (folder category auto-applied)`);
             } catch (moveError) {
                 this.logError('Failed to move email:', moveError.message);
                 throw moveError;
             }
 
-            // Step 8: Apply appropriate category based on classification
-            this.log('Step 8: Applying category tag...');
-            // Colors: Preset0=Red, Preset1=Orange, Preset2=Brown, Preset3=Yellow, 
-            //         Preset4=Green, Preset5=Teal, Preset6=Blue, Preset7=Purple
-            let categoryName = null;
-            let categoryColor = 'Preset6'; // Default to blue
-            
-            switch (classification.classification) {
-                case 'quote':
-                    categoryName = 'QUOTE';
-                    categoryColor = 'Preset4'; // Green
-                    break;
-                case 'clarification_request':
-                    categoryName = 'CLARIFICATION';
-                    categoryColor = 'Preset3'; // Yellow
-                    break;
-                case 'engineer_response':
-                    categoryName = 'ENGINEER RESPONSE';
-                    categoryColor = 'Preset6'; // Blue
-                    break;
-                default:
-                    this.log(`  Unknown classification: ${classification.classification}, no category applied`);
-            }
-
-            if (categoryName) {
-                try {
-                    await EmailOperations.applyCategoryToEmail(email.id, categoryName, categoryColor);
-                    this.logSuccess(`Applied category "${categoryName}" (${categoryColor}) to email`);
-                } catch (categoryError) {
-                    this.logError('Failed to apply category (non-critical):', categoryError.message);
-                }
-            }
-
-            // Step 9: Mark email as read
-            this.log('Step 9: Marking email as read...');
+            // Step 8: Mark email as read
+            this.log('Step 8: Marking email as read...');
             try {
-                await EmailOperations.markAsRead(email.id, true);
+                await EmailOperations.markAsRead(movedEmailId, true);
                 this.logSuccess('Email marked as read');
             } catch (readError) {
                 this.logError('Failed to mark email as read (non-critical):', readError.message);
