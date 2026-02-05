@@ -3168,7 +3168,7 @@ textarea.ms-TextField-field {
     bottom: 40px;
     left: 40px; /* 4px container padding + 20px card padding + 16px half number width */
     width: 2px;
-    background-color: #f3f2f1;
+    background-color: transparent; /* Changed from #f3f2f1 to transparent to hide the line as requested */
     z-index: 2;
 }
 
