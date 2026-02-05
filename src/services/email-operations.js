@@ -1515,9 +1515,10 @@ const FolderCategoryService = {
     /**
      * Ensure all folder categories exist in the user's master category list
      * Should be called once after sign-in
+     * @param {boolean} force - If true, bypasses the initialization check and re-runs
      */
-    async ensureFolderCategoriesExist() {
-        if (this.categoriesInitialized) {
+    async ensureFolderCategoriesExist(force = false) {
+        if (this.categoriesInitialized && !force) {
             console.log('Folder categories already initialized this session');
             return;
         }
@@ -1562,8 +1563,8 @@ const FolderCategoryService = {
                         // Category might already exist with different casing
                         console.warn(`Could not create category "${catDef.name}":`, createError.message);
                     }
-                } else {
-                    // Update color if needed
+                } else if (existingCat.color !== catDef.color) {
+                    // Update color only if different
                     try {
                         await AuthService.graphRequest(
                             `/me/outlook/masterCategories/${encodeURIComponent(existingCat.id)}`,
@@ -1572,10 +1573,12 @@ const FolderCategoryService = {
                                 body: JSON.stringify({ color: catDef.color })
                             }
                         );
-                        console.log(`Updated color for category: "${catDef.name}" (${catDef.color})`);
+                        console.log(`Updated color for category: "${catDef.name}" from ${existingCat.color} to ${catDef.color}`);
                     } catch (updateError) {
                         console.warn(`Could not update category "${catDef.name}":`, updateError.message);
                     }
+                } else {
+                    console.log(`Category "${catDef.name}" already has correct color (${catDef.color})`);
                 }
             }
 
@@ -1587,8 +1590,54 @@ const FolderCategoryService = {
     },
 
     /**
+     * Ensure a master category exists with the correct color
+     * Creates the category if it doesn't exist, updates the color if it does
+     * @param {string} categoryName - The category display name
+     * @param {string} color - The color preset (e.g., 'Preset4')
+     */
+    async ensureCategoryWithColor(categoryName, color) {
+        if (!AuthService.isSignedIn()) return;
+
+        try {
+            // Get all master categories
+            const response = await AuthService.graphRequest('/me/outlook/masterCategories');
+            const existingCategories = response.value || [];
+            
+            // Find existing category (case-insensitive)
+            const existing = existingCategories.find(cat => 
+                cat.displayName && cat.displayName.toLowerCase() === categoryName.toLowerCase()
+            );
+
+            if (!existing) {
+                // Create new category with color
+                await AuthService.graphRequest('/me/outlook/masterCategories', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        displayName: categoryName,
+                        color: color
+                    })
+                });
+                console.log(`Created master category "${categoryName}" with color ${color}`);
+            } else if (existing.color !== color) {
+                // Update color if different
+                await AuthService.graphRequest(
+                    `/me/outlook/masterCategories/${encodeURIComponent(existing.id)}`,
+                    {
+                        method: 'PATCH',
+                        body: JSON.stringify({ color: color })
+                    }
+                );
+                console.log(`Updated master category "${categoryName}" color to ${color}`);
+            }
+        } catch (error) {
+            console.warn(`Could not ensure category "${categoryName}" with color:`, error.message);
+        }
+    },
+
+    /**
      * Set folder category on an email
      * Removes any existing folder categories and applies the new one
+     * Also ensures the master category has the correct color
      * @param {string} emailId - The email ID (Graph API format)
      * @param {string} folderName - The folder name to tag the email with
      */
@@ -1616,6 +1665,10 @@ const FolderCategoryService = {
         }
 
         try {
+            // IMPORTANT: First ensure the master category exists with correct color
+            // This is critical - without this, categories appear without colors
+            await this.ensureCategoryWithColor(catDef.name, catDef.color);
+
             // Get current categories on the email
             const email = await AuthService.graphRequest(
                 `/me/messages/${encodeURIComponent(emailId)}?$select=id,categories`
@@ -1645,7 +1698,7 @@ const FolderCategoryService = {
             // Update cache
             this.messageCategoryCache[emailId] = catDef.name;
             
-            console.log(`Set folder category "${catDef.name}" on email ${emailId}`);
+            console.log(`Set folder category "${catDef.name}" (${catDef.color}) on email ${emailId}`);
         } catch (error) {
             console.error(`Error setting folder category on email ${emailId}:`, error);
             // Don't throw - category failure shouldn't break email operations

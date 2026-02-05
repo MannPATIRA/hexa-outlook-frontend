@@ -5763,13 +5763,13 @@ async function handleGenerateRFQs() {
         }
         
         // Enable the Review & Send RFQs step
-        // const reviewStep = document.getElementById('step-review-rfqs');
-        // if (reviewStep) {
-        //    Helpers.enableStep(reviewStep);
-        // }
+        const reviewStep = document.getElementById('step-review-rfqs');
+        if (reviewStep) {
+            Helpers.enableStep(reviewStep);
+        }
         
         // Render RFQ cards in the review step
-        // renderRFQCards(rfqs);
+        renderRFQCards(rfqs);
         
         Helpers.showSuccess(`${rfqs.length} RFQ(s) generated successfully`);
     } catch (error) {

@@ -303,29 +303,59 @@
             <!-- ==================== RFQ WORKFLOW ==================== -->
             <section id="rfq-workflow-tab">
                 
-                <!-- Step 1: Select PR -->
-                <div id="step-select-pr" class="workflow-step">
-                    <h2 class="ms-font-l step-header clickable-step-title" id="pr-step-title">
-                        <span class="step-number">1</span>
-                        <span class="step-title-text">Select Purchase Requisition</span>
-                    </h2>
+                <div class="workflow-header-section">
+                    <h2>RFQ Workflow</h2>
+                    <p class="typography-muted">Manage your procurement process efficiently.</p>
                 </div>
 
-                <!-- Step 2: Select Suppliers -->
-                <div id="step-select-suppliers" class="workflow-step disabled">
-                    <h2 class="ms-font-l step-header clickable-step-title" id="supplier-step-title">
-                        <span class="step-number">2</span>
-                        <span class="step-title-text">Select Suppliers</span>
-                    </h2>
-                </div>
+                <div class="workflow-steps-container">
+                    <!-- Step 1: Select PR -->
+                    <div id="step-select-pr" class="modern-step-card">
+                        <div class="step-status-indicator active">
+                            <span class="step-number">1</span>
+                            <div class="step-line"></div>
+                        </div>
+                        <div class="step-content-wrapper" id="pr-step-title">
+                            <div class="step-info">
+                                <h3 class="step-title">Select Purchase Requisition</h3>
+                                <p class="step-description">Choose a PR to initiate the RFQ process</p>
+                            </div>
+                            <i class="ms-Icon ms-Icon--ChevronRight step-arrow"></i>
+                        </div>
+                    </div>
 
-                <!-- Step 3: Generate RFQs -->
-                <div id="step-generate-rfqs" class="workflow-step disabled">
-                    <h2 class="ms-font-l step-header clickable-step-title" id="generate-rfqs-step-title">
-                        <span class="step-number">3</span>
-                        <span class="step-title-text">Generate RFQs</span>
-                    </h2>
+                    <!-- Step 2: Select Suppliers -->
+                    <div id="step-select-suppliers" class="modern-step-card disabled">
+                        <div class="step-status-indicator">
+                            <span class="step-number">2</span>
+                            <div class="step-line"></div>
+                        </div>
+                        <div class="step-content-wrapper" id="supplier-step-title">
+                            <div class="step-info">
+                                <h3 class="step-title">Select Suppliers</h3>
+                                <p class="step-description">Add suppliers for the selected PR</p>
+                            </div>
+                            <i class="ms-Icon ms-Icon--ChevronRight step-arrow"></i>
+                        </div>
+                    </div>
+
+                    <!-- Step 3: Generate RFQs -->
+                    <div id="step-generate-rfqs" class="modern-step-card disabled">
+                        <div class="step-status-indicator">
+                            <span class="step-number">3</span>
+                        </div>
+                        <div class="step-content-wrapper" id="generate-rfqs-step-title">
+                            <div class="step-info">
+                                <h3 class="step-title">Generate RFQs</h3>
+                                <p class="step-description">Create and send emails to suppliers</p>
+                            </div>
+                            <i class="ms-Icon ms-Icon--Send step-arrow"></i>
+                        </div>
+                    </div>
                 </div>
+                
+                <!-- Removed Review & Send RFQs step as requested -->
+                <div id="step-review-rfqs" class="workflow-step disabled hidden" style="display: none;"></div>
 
             </section>
 
