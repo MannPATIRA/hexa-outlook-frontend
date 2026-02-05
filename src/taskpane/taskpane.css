@@ -576,9 +576,8 @@ main {
 }
 
 .mode-header.quote-header {
-    background: #ffffff;
-    color: #323130;
-    border-bottom: 1px solid #edebe9;
+    background: linear-gradient(135deg, #16a34a 0%, #15803d 100%);
+    color: white;
 }
 
 .mode-icon {

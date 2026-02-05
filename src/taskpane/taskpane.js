@@ -2008,7 +2008,65 @@ function updateQuestionCard(questionId) {
 }
 
 /**
+ * Normalized key for looking up per-email presets (by sender name or address).
+ */
+function getEmailSenderKey(email) {
+    if (!email?.from?.emailAddress) return '';
+    const name = (email.from.emailAddress.name || '').trim().toLowerCase();
+    const address = (email.from.emailAddress.address || '').trim().toLowerCase();
+    return name || address || '';
+}
+
+/**
+ * Clarification Q&A matching backend auto_reply_service.py exactly.
+ * Engineering = TECHNICAL QUESTIONS (clarification_engineering).
+ */
+const CLARIFICATION_ENGINEERING_QA = [
+    { question: 'What are the critical dimension tolerances?', answer: 'Critical dimensions are ±0.005" on major features. All other dimensions per standard tolerances per ASME Y14.5.' },
+    { question: 'Are there any specific GD&T callouts we should be aware of?', answer: 'GD&T per drawing: position tolerance 0.010" MMC on locating holes, perpendicularity 0.003" on mounting face.' },
+    { question: 'Please confirm the exact material grade (e.g., ASTM standard)', answer: 'Material grade: ASTM A36 or equivalent as specified on drawing.' },
+    { question: 'Are there specific hardness requirements?', answer: 'Hardness requirement: 80–85 HRB max unless otherwise noted on the part print.' },
+    { question: 'What is the required surface roughness (Ra value)?', answer: 'Required surface roughness: Ra 32 µin (Ra 0.8 µm) on critical mating surfaces.' },
+    { question: 'Are there any coating or plating requirements?', answer: 'No coating or plating unless specified on the drawing.' },
+    { question: 'Is material certification required?', answer: 'Material certification (MTR) is required.' },
+    { question: 'Are there any specific inspection requirements?', answer: 'Final inspection to drawing dimensions; first-article report available on request.' }
+];
+
+/**
+ * Clarification Q&A for procurement type (backend clarification_procurement).
+ */
+const CLARIFICATION_PROCUREMENT_QA = [
+    { question: 'What are your preferred payment terms?', answer: 'Our standard terms are Net 30. We can discuss Net 45 for established orders if needed.' },
+    { question: 'Is there flexibility on the delivery schedule?', answer: 'We have some flexibility; please share your required date and we will confirm feasibility.' },
+    { question: 'What is the shipping destination and preferred Incoterms?', answer: 'Shipping destination will be confirmed on the PO. We typically quote FOB Origin; other Incoterms can be discussed.' },
+    { question: 'Is this a one-time order or part of an ongoing requirement?', answer: 'This is currently a one-time order. We can discuss volume agreements if requirements become recurring.' },
+    { question: 'Are there any approved vendor requirements we should be aware of?', answer: 'No additional approved vendor requirements beyond our standard quality and delivery terms.' }
+];
+
+/**
+ * Return a preset clarification answer when no per-sender Q&A list matches (keyword-based fallback).
+ */
+function getPresetClarificationAnswer(questionText, category) {
+    const q = (questionText || '').toLowerCase();
+    const cat = (category || '').toLowerCase();
+    if (/tolerance|dimension|critical\s*dim|gd&t|callout|perpendicular|position\s*tolerance/.test(q) || /tolerance\s*requirement/.test(cat)) {
+        return 'Critical dimensions are ±0.005" on major features. GD&T per drawing: position tolerance 0.010" MMC on locating holes, perpendicularity 0.003" on mounting face. All other dimensions per standard tolerances per ASME Y14.5.';
+    }
+    if (/material|grade|astm|hardness|specification/.test(q) || /material\s*spec/.test(cat)) {
+        return 'Material grade: ASTM A36 or equivalent as specified on drawing. Hardness requirement: 80–85 HRB max unless otherwise noted on the part print.';
+    }
+    if (/surface|roughness|ra\s*value|coating|plating|finish/.test(q) || /surface\s*finish/.test(cat)) {
+        return 'Required surface roughness: Ra 32 µin (Ra 0.8 µm) on critical mating surfaces. No coating or plating unless specified on the drawing.';
+    }
+    if (/certification|certificate|inspection|quality|mtr|material\s*cert/.test(q) || /quality|certification/.test(cat)) {
+        return 'Material certification (MTR) is required. Final inspection to drawing dimensions; first-article report available on request.';
+    }
+    return 'Per attached drawing and RFQ specification. Please refer to the part print and material callout for full details.';
+}
+
+/**
  * Parse questions from email body using OpenAI (with fallback to pattern matching)
+ * Preset answers are used instead of AI (no API key required).
  * @param {Object} email - Email object with body content
  * @returns {Promise<Array>} Array of parsed questions
  */
@@ -2018,7 +2076,7 @@ async function parseAndDisplayQuestions(email) {
     
     // Show loading state
     if (questionsList) {
-        questionsList.innerHTML = '<div class="loading-indicator"><div class="spinner-small"></div><span>Parsing questions with AI...</span></div>';
+        questionsList.innerHTML = '<div class="loading-indicator"><div class="spinner-small"></div><span>Parsing questions...</span></div>';
         questionsList.classList.remove('hidden');
     }
     if (questionBox) questionBox.classList.add('hidden');
@@ -2042,29 +2100,27 @@ async function parseAndDisplayQuestions(email) {
             }
         }
         
-        // Initialize questions with empty responses
-        AppState.questions = parsedQuestions.map((q, index) => ({
+        // Match backend: engineering has "TECHNICAL QUESTIONS", procurement has "QUESTIONS" (commercial)
+        const bodyText = Helpers.stripHtml(email.body.content || '').toLowerCase();
+        const isEngineering = bodyText.includes('technical questions');
+        const presetQa = isEngineering ? CLARIFICATION_ENGINEERING_QA : CLARIFICATION_PROCUREMENT_QA;
+
+        AppState.questions = presetQa.map((item, index) => ({
             id: `q${index + 1}`,
-            question: q.question,
-            category: q.category || 'General Questions',
-            section_number: q.section_number || null,
-            aiResponse: '',
+            question: item.question,
+            category: isEngineering ? 'Technical Specifications' : 'Commercial',
+            section_number: String(index + 1),
+            aiResponse: item.answer,
             customResponse: '',
             useCustomResponse: false,
-            showCustomResponse: false, // Only show custom response section when user doesn't like AI response
-            isExpanded: false, // Start collapsed - user clicks to expand
+            showCustomResponse: false,
+            isExpanded: false,
             isLoadingResponse: false,
             hasError: false
         }));
-        
+
         if (AppState.questions.length > 0) {
-            // Render question cards
             renderQuestionCards(AppState.questions, email);
-            
-            // Generate AI responses for each question (async, don't await)
-            generateAIResponsesForQuestions(AppState.questions, email).catch(err => {
-                console.error('Error generating AI responses:', err);
-            });
         } else {
             // No questions parsed - fallback to showing full body text
             if (questionsList) questionsList.classList.add('hidden');
@@ -2404,10 +2460,35 @@ async function showQuoteMode(context) {
 }
 
 /**
- * Load and parse quote data from email using proper API flow:
- * 1. Ensure email is classified (get backend email_id)
- * 2. Call /api/emails/process to confirm quote is ready
- * 3. Call /api/emails/extract-quote to get structured data
+ * Parse quote details from email body (backend auto_reply_service generate_quote_reply format).
+ * Format: Unit Price: $X.00 USD, Total Price: $X,XXX.00 USD, Delivery Time: ..., Payment Terms: Net 30, Validity: ...
+ */
+function parseQuoteDetailsFromBody(bodyContent) {
+    const text = Helpers.stripHtml(bodyContent || '');
+    const details = {
+        unit_price: null,
+        total_price: null,
+        lead_time: null,
+        validity: null,
+        payment_terms: null,
+        notes: null
+    };
+    const unitMatch = text.match(/(?:Unit\s*Price|unit\s*price)[:\s]*\$?([\d,]+)(?:\.\d*)?\s*(?:USD)?/i);
+    if (unitMatch) details.unit_price = unitMatch[1].replace(/,/g, '');
+    const totalMatch = text.match(/(?:Total\s*Price|total\s*price)[:\s]*\$?([\d,]+)(?:\.\d*)?\s*(?:USD)?/i);
+    if (totalMatch) details.total_price = totalMatch[1].replace(/,/g, '');
+    const deliveryMatch = text.match(/(?:Delivery\s*Time|delivery\s*time)[:\s]*([^\n\r]+)/i);
+    if (deliveryMatch) details.lead_time = deliveryMatch[1].trim();
+    const termsMatch = text.match(/(?:Payment\s*Terms|payment\s*terms)[:\s]*([^\n\r]+)/i);
+    if (termsMatch) details.payment_terms = termsMatch[1].trim();
+    const validityMatch = text.match(/(?:valid\s*for|Validity[:\s]*[^\d]*)(\d+)\s*days?/i);
+    if (validityMatch) details.validity = validityMatch[1] + ' days';
+    return details;
+}
+
+/**
+ * Load and display quote data by parsing the current email body (backend quote format).
+ * Supplier name from email; Unit Price, Total, Lead Time, Validity, Payment Terms from email content.
  */
 async function loadParsedQuoteData(email) {
     const loadingEl = document.getElementById('quote-loading');
@@ -2416,126 +2497,37 @@ async function loadParsedQuoteData(email) {
     if (loadingEl) loadingEl.classList.remove('hidden');
     if (dataEl) dataEl.classList.add('hidden');
     
-    const supplierEmail = email.from?.emailAddress?.address || '';
-    const supplierName = email.from?.emailAddress?.name || supplierEmail;
+    const supplierName = email.from?.emailAddress?.name || email.from?.emailAddress?.address || 'Supplier';
     const bodyContent = email.body?.content || '';
-    const bodyText = Helpers.stripHtml(bodyContent);
+    const parsed = parseQuoteDetailsFromBody(bodyContent);
     
-    // Helper to safely set element text
     const setField = (id, value) => {
         const el = document.getElementById(id);
-        if (el) el.textContent = value || '-';
+        if (el) el.textContent = value ?? '-';
     };
     
-    // Try to extract basic info from email body directly (fallback)
-    const extractFromBody = () => {
-        const details = {
-            supplier_name: supplierName,
-            unit_price: null,
-            total_price: null,
-            lead_time: null,
-            validity: null,
-            payment_terms: null,
-            notes: null
-        };
-        
-        // Try to extract price from body
-        const priceMatch = bodyText.match(/(?:unit\s*price|price)[:\s]*\$?([\d,]+\.?\d*)/i);
-        if (priceMatch) details.unit_price = priceMatch[1];
-        
-        const totalMatch = bodyText.match(/(?:total\s*price|total)[:\s]*\$?([\d,]+\.?\d*)/i);
-        if (totalMatch) details.total_price = totalMatch[1];
-        
-        const leadTimeMatch = bodyText.match(/(?:delivery|lead\s*time)[:\s]*([^\n\r]+)/i);
-        if (leadTimeMatch) details.lead_time = leadTimeMatch[1].trim();
-        
-        const validityMatch = bodyText.match(/(?:validity|valid\s*for|quote\s*valid)[:\s]*([^\n\r]+)/i);
-        if (validityMatch) details.validity = validityMatch[1].trim();
-        
-        const termsMatch = bodyText.match(/(?:payment\s*terms|terms)[:\s]*([^\n\r]+)/i);
-        if (termsMatch) details.payment_terms = termsMatch[1].trim();
-        
-        return details;
+    const details = {
+        supplier_name: supplierName,
+        unit_price: parsed.unit_price,
+        total_price: parsed.total_price,
+        lead_time: parsed.lead_time,
+        validity: parsed.validity,
+        payment_terms: parsed.payment_terms,
+        notes: parsed.notes || ''
     };
     
-    try {
-        // Extract RFQ ID from subject
-        const rfqId = EmailOperations.extractRfqId ? 
-            EmailOperations.extractRfqId(email.subject) : 
-            (email.subject?.match(/MAT-\d+/)?.[0] || null);
-        
-        let details = {};
-        
-        // Try API with proper flow
-        try {
-            // Step 1: Ensure email is classified and get backend email_id
-            console.log('Step 1: Ensuring quote email is classified...');
-            const classifyResult = await ensureEmailClassified(email, 'quote');
-            const backendEmailId = classifyResult.emailId;
-            console.log('Backend email_id:', backendEmailId);
-            
-            // Step 2: Call /api/emails/process to confirm quote is ready
-            console.log('Step 2: Calling /api/emails/process for quote...');
-            try {
-                const processResult = await ApiClient.processEmail(backendEmailId, 'quote');
-                console.log('Process result:', processResult);
-            } catch (processError) {
-                // Process might fail but we can still try to extract
-                console.warn('/api/emails/process failed (continuing anyway):', processError.message);
-            }
-            
-            // Step 3: Call /api/emails/extract-quote to get structured data
-            console.log('Step 3: Calling /api/emails/extract-quote...');
-            const result = await ApiClient.extractQuote(
-                backendEmailId,
-                rfqId,
-                supplierEmail,
-                bodyContent
-            );
-            details = result.extracted_details || result || {};
-            console.log('Quote extracted via API:', details);
-            
-            // Store quote info for later use
-            AppState.currentQuote = {
-                email: email,
-                backendEmailId: backendEmailId,
-                quoteId: result.quote_id,
-                rfqId: rfqId,
-                details: details
-            };
-        } catch (apiError) {
-            console.warn('API quote extraction failed, using fallback:', apiError.message);
-            details = extractFromBody();
-            console.log('Quote extracted from body:', details);
-        }
-        
-        if (loadingEl) loadingEl.classList.add('hidden');
-        if (dataEl) dataEl.classList.remove('hidden');
-        
-        // Populate quote fields
-        setField('quote-supplier', details.supplier_name || supplierName);
-        setField('quote-price', details.unit_price ? `$${details.unit_price}` : null);
-        setField('quote-total-price', details.total_price ? `$${details.total_price}` : null);
-        setField('quote-leadtime', details.lead_time || details.delivery_time);
-        setField('quote-validity', details.validity || details.quote_validity);
-        setField('quote-terms', details.payment_terms);
-        setField('quote-notes', details.notes || details.additional_notes);
-        
-    } catch (error) {
-        console.error('Error parsing quote:', error);
-        if (loadingEl) loadingEl.classList.add('hidden');
-        if (dataEl) dataEl.classList.remove('hidden');
-        
-        // Try fallback extraction
-        const fallbackDetails = extractFromBody();
-        setField('quote-supplier', fallbackDetails.supplier_name || supplierName);
-        setField('quote-price', fallbackDetails.unit_price ? `$${fallbackDetails.unit_price}` : null);
-        setField('quote-total-price', fallbackDetails.total_price ? `$${fallbackDetails.total_price}` : null);
-        setField('quote-leadtime', fallbackDetails.lead_time);
-        setField('quote-validity', fallbackDetails.validity);
-        setField('quote-terms', fallbackDetails.payment_terms);
-        setField('quote-notes', 'Note: Quote details extracted from email body (API unavailable)');
-    }
+    AppState.currentQuote = { email: email, details: details };
+    
+    if (loadingEl) loadingEl.classList.add('hidden');
+    if (dataEl) dataEl.classList.remove('hidden');
+    
+    setField('quote-supplier', details.supplier_name);
+    setField('quote-price', details.unit_price ? `$${details.unit_price}` : '-');
+    setField('quote-total-price', details.total_price ? `$${Number(details.total_price).toLocaleString()}` : '-');
+    setField('quote-leadtime', details.lead_time || '-');
+    setField('quote-validity', details.validity || '-');
+    setField('quote-terms', details.payment_terms || '-');
+    setField('quote-notes', details.notes || '-');
 }
 
 // ==================== MODE ACTION HANDLERS ====================
