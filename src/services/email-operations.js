@@ -1291,9 +1291,10 @@ const EmailOperations = {
             }
             
             // Try to build from structured object (like from backend)
-            if (body.greeting || body.introduction || body.material_details || body.closing) {
+            if (body.title || body.greeting || body.introduction || body.material_details || body.closing) {
                 console.log('extractBodyContent: building from structured object');
                 let text = '';
+                if (body.title) text += body.title + '\n\n';
                 if (body.greeting) text += body.greeting + '\n\n';
                 if (body.introduction) text += body.introduction + '\n\n';
                 if (body.material_details) {

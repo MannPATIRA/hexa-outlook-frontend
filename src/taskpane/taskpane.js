@@ -1088,11 +1088,13 @@ async function showDraftMode(context) {
     showMode('draft-mode');
     AppState.currentMode = 'draft';
 
-    // Update header title
+    // Update header title to account name (e.g. "test account"), not "RFQ Draft Editor"
     const headerTitle = document.getElementById('header-title');
     if (headerTitle) {
-        headerTitle.textContent = 'RFQ Draft Editor';
-        headerTitle.setAttribute('title', 'RFQ Draft Editor');
+        const user = AuthService.getUser();
+        const accountName = user ? (user.name || user.email || '') : '';
+        headerTitle.textContent = accountName;
+        headerTitle.setAttribute('title', accountName || '');
     }
 
     // Load pending RFQ drafts
@@ -5889,10 +5891,13 @@ function previewRFQ(index) {
     
     currentPreviewIndex = index;
     
-    // Populate preview modal
+    // Populate preview modal (include subject as title at top of body)
     document.getElementById('preview-to').value = rfq.supplier_email;
     document.getElementById('preview-subject').value = rfq.subject;
-    document.getElementById('preview-body').value = EmailOperations.formatRfqBodyAsText(rfq.body);
+    const bodyText = EmailOperations.formatRfqBodyAsText(rfq.body);
+    document.getElementById('preview-body').value = rfq.subject
+        ? (rfq.subject + '\n\n' + (bodyText || '').trim()).trim()
+        : (bodyText || '');
     
     // Show attachments
     const attachmentsContainer = document.getElementById('preview-attachments');
@@ -6028,7 +6033,11 @@ async function createSingleDraft(index) {
         Helpers.showLoading('Creating draft...');
         
         // Extract body content (handles both string and object formats)
-        const bodyContent = EmailOperations.extractBodyContent(rfq.body);
+        let bodyContent = EmailOperations.extractBodyContent(rfq.body);
+        // Prepend subject as title in the main body
+        if (rfq.subject && typeof bodyContent === 'string') {
+            bodyContent = (rfq.subject + '\n\n' + (bodyContent || '').trim()).trim();
+        }
         
         // Convert to HTML if needed
         let htmlBody = '';
@@ -6078,7 +6087,11 @@ async function handleCreateAllDrafts() {
         
         for (const rfq of AppState.rfqs) {
             // Extract body content (handles both string and object formats)
-            const bodyContent = EmailOperations.extractBodyContent(rfq.body);
+            let bodyContent = EmailOperations.extractBodyContent(rfq.body);
+            // Prepend subject as title in the main body
+            if (rfq.subject && typeof bodyContent === 'string') {
+                bodyContent = (rfq.subject + '\n\n' + (bodyContent || '').trim()).trim();
+            }
             
             // Convert to HTML if needed
             let htmlBody = '';
