@@ -1088,13 +1088,11 @@ async function showDraftMode(context) {
     showMode('draft-mode');
     AppState.currentMode = 'draft';
 
-    // Update header title to account name (e.g. "test account"), not "RFQ Draft Editor"
+    // No title in draft mode - leave header title empty
     const headerTitle = document.getElementById('header-title');
     if (headerTitle) {
-        const user = AuthService.getUser();
-        const accountName = user ? (user.name || user.email || '') : '';
-        headerTitle.textContent = accountName;
-        headerTitle.setAttribute('title', accountName || '');
+        headerTitle.textContent = '';
+        headerTitle.removeAttribute('title');
     }
 
     // Load pending RFQ drafts
