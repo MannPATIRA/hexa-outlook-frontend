@@ -3911,12 +3911,16 @@ async function showPOGenerationMode(quote) {
     poMode.classList.remove('hidden');
     AppState.currentMode = 'po-generation';
     
-    // Update header title
+    // Top bar: no title for this page
     const headerTitle = document.getElementById('header-title');
     if (headerTitle) {
-        headerTitle.textContent = 'Purchase Order Generation';
-        headerTitle.setAttribute('title', 'Purchase Order Generation');
+        headerTitle.textContent = '';
+        headerTitle.removeAttribute('title');
     }
+    
+    // Hide main content so RFQ Workflow section doesn't bleed at bottom
+    const mainContent = document.getElementById('main-content');
+    if (mainContent) mainContent.style.display = 'none';
     
     // Show loading state, hide success state
     const loadingState = document.getElementById('po-loading-state');
